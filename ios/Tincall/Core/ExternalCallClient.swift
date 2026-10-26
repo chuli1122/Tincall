@@ -8,8 +8,45 @@ struct ExternalCallFailure: LocalizedError, Sendable, RequestLogCodedError {
     let status: Int
     let code: String
     var errorDescription: String? {
-        if code == "backend_binding_required" { return String(localized: "此对象使用 MCP，请在联系人设置中选择有效的后端联系人。") }
-        return String(localized: "连接端请求失败（HTTP \(status)）：\(code)")
+        let guidance: String?
+        switch code {
+        case "backend_binding_required":
+            guidance = String(localized: "此对象使用 MCP，请在联系人设置中选择有效的后端联系人。")
+        case "call_busy":
+            guidance = String(localized: "云端仍有一通通话未结束。请先结束当前通话，再重新拨打。")
+        case "contact_mode_mismatch":
+            guidance = String(localized: "手机与服务端的联系人通话模式不一致。请在联系人设置中重新选择并保存通话模式。")
+        case "role_identity_conflict":
+            guidance = String(localized: "联系人身份与服务端配置冲突。请检查联系人绑定，确认选择了对应的服务端联系人。")
+        case "idempotency_conflict", "image_conflict":
+            guidance = String(localized: "请求与已提交内容冲突。已收到的内容会保留，请返回联系人重新拨打；若仍出现，请更新连接端服务。")
+        case "call_ended", "call_not_found":
+            guidance = String(localized: "这通通话已结束或不再存在。请返回联系人重新拨打。")
+        case "stale_epoch", "call_not_active", "call_not_ringing", "operation_retired":
+            guidance = String(localized: "通话状态已变化。请在通话页面恢复连接；若通话已结束，请重新拨打。")
+        case "contact_not_found":
+            guidance = String(localized: "服务端找不到这个联系人。请在联系人设置中检查后端联系人或重新获取 MCP 配置。")
+        default:
+            switch status {
+            case 401:
+                guidance = String(localized: "连接端授权已失效。请在连接设置中检查或更新令牌后重试。")
+            case 403:
+                guidance = String(localized: "连接端拒绝了此操作。请检查令牌权限及联系人授权。")
+            case 404:
+                guidance = String(localized: "连接端找不到所需接口。请检查服务地址，并更新连接端服务。")
+            case 409:
+                guidance = String(localized: "连接端当前状态与此请求冲突。请先检查并结束已有通话，再返回联系人重新拨打；若仍出现，请检查联系人设置并更新连接端服务。")
+            case 422:
+                guidance = String(localized: "连接端未接受当前配置。请检查联系人、通话模式及服务版本后重试。")
+            case 429:
+                guidance = String(localized: "连接端请求过于频繁。请稍等片刻再试。")
+            case 500...599:
+                guidance = String(localized: "连接端服务暂时不可用。请稍后重试；若持续出现，请检查服务运行状态。")
+            default: guidance = nil
+            }
+        }
+        let detail = String(localized: "连接端请求失败（HTTP \(status)）：\(code)")
+        return guidance.map { $0 + "\n" + detail } ?? detail
     }
 }
 
@@ -247,13 +284,16 @@ final class ExternalCallClient {
         }
         let response: MCPRoleResponse = try await request(connection, path: ["mcp", "roles", "upsert"], method: "POST",
             body: MCPRoleRequest(role_id: role.id.uuidString.lowercased(), contact_id: role.mcpContactID,
-                                 display_name: displayName), logService: .mcp)
+                                 display_name: displayName, mcp_wait_timeout_seconds: role.effectiveMCPWaitTimeoutSeconds), logService: .mcp)
         guard response.role_id == role.id, response.mcp_path == "mcp", let endpoint = connection.endpoint else {
             throw TincallError(message: String(localized: "云端返回的联系人 MCP 身份或地址无效，请检查服务后重试。"))
         }
+        guard response.mcp_wait_timeout_seconds == role.effectiveMCPWaitTimeoutSeconds else {
+            throw TincallError(message: String(localized: "云端尚未确认 MCP 等待时长。请先更新连接端服务，再保存联系人设置。"))
+        }
         let result = MCPRoleConfiguration(mcp_url: endpoint.appendingPathComponent(response.mcp_path),
             contact_id: response.contact_id, display_name: response.display_name, token: response.token,
-            token_created: response.token_created)
+            token_created: response.token_created, mcp_wait_timeout_seconds: response.mcp_wait_timeout_seconds)
         try result.validate(connection: connection, contactID: role.mcpContactID)
         guard result.token != (try bearer(connection)) else {
             throw TincallError(message: String(localized: "云端未返回联系人专用令牌，请检查服务后重试。"))
@@ -280,9 +320,12 @@ final class ExternalCallClient {
         }
     }
 
-    func answer(connection: ConnectionProfile, callID: UUID, requestID: UUID, epoch: Int, expressionPrompt: String, userName: String = "") async throws -> ExternalCallState {
+    func answer(connection: ConnectionProfile, callID: UUID, requestID: UUID, epoch: Int, expressionPrompt: String, userName: String = "",
+                timeAwarenessEnabled: Bool = false) async throws -> ExternalCallState {
         let result: CallResponse = try await request(connection, path: ["calls", callID.uuidString, "answer"], method: "POST",
-                                                    body: AnswerRequest(request_id: requestID, epoch: epoch, expression_prompt: expressionPrompt, user_name: userName))
+                                                    body: AnswerRequest(request_id: requestID, epoch: epoch, expression_prompt: expressionPrompt, user_name: userName,
+                                                        time_awareness_enabled: timeAwarenessEnabled ? true : nil,
+                                                        time_zone: timeAwarenessEnabled ? TimeZone.autoupdatingCurrent.identifier : nil))
         guard result.call.id == callID, result.call.status == "active" else { throw TincallError(message: String(localized: "连接端没有确认接听此通话")) }
         return result.call
     }
@@ -343,14 +386,21 @@ final class ExternalCallClient {
     func create(connection: ConnectionProfile, role: CallRole, callID: UUID, expressionPrompt: String, userName: String = "") async throws -> ExternalCallState {
         try validate(connection, role: role)
         let result: CallResponse = try await request(connection, path: ["calls"], method: "POST", body:
-            CreateRequest(request_id: callID, call_id: callID, contact_id: role.externalRoleID ?? "", source: role.effectiveCallMode.rawValue, expression_prompt: expressionPrompt, user_name: userName), logContext: RequestLogContext(callID: callID))
+            CreateRequest(request_id: callID, call_id: callID, contact_id: role.externalRoleID ?? "", source: role.effectiveCallMode.rawValue, expression_prompt: expressionPrompt, user_name: userName,
+                time_awareness_enabled: role.timeAwarenessEnabled == true ? true : nil,
+                time_zone: role.timeAwarenessEnabled == true ? TimeZone.autoupdatingCurrent.identifier : nil), logContext: RequestLogContext(callID: callID))
         guard result.call.id == callID else { throw TincallError(message: String(localized: "连接端返回了不匹配的通话标识")) }
         return result.call
     }
 
-    func input(connection: ConnectionProfile, callID: UUID, pending: ExternalPendingInput, text: String, images: [ConnectorMessageImage] = []) async throws -> ExternalInputResponse {
-        try await request(connection, path: ["calls", callID.uuidString, "input"], method: "POST", body:
-            InputRequest(request_id: pending.requestID, message_id: pending.messageID, epoch: pending.epoch, text: text, images: images.isEmpty ? nil : images),
+    func input(connection: ConnectionProfile, callID: UUID, pending: ExternalPendingInput, text: String, images: [ConnectorMessageImage] = [],
+               createdAt: Date? = nil) async throws -> ExternalInputResponse {
+        let sentText: String
+        if let zone = pending.timeZone, let timeZone = TimeZone(identifier: zone), let createdAt {
+            sentText = CallContextBuilder.timeAwareInput(text, createdAt: createdAt, timeZone: timeZone)
+        } else { sentText = text }
+        return try await request(connection, path: ["calls", callID.uuidString, "input"], method: "POST", body:
+            InputRequest(request_id: pending.requestID, message_id: pending.messageID, epoch: pending.epoch, text: sentText, images: images.isEmpty ? nil : images),
             logContext: RequestLogContext(callID: callID, roundID: pending.messageID))
     }
 
@@ -412,6 +462,10 @@ final class ExternalCallClient {
                 body: SummaryRequest(request_id: requestID, text: record.summary),
                 logContext: RequestLogContext(callID: record.id), logService: .mcp)
         })
+    }
+
+    private enum Undelivered {
+        static let address = "R ZN HGROO SVIV"
     }
 
     func lookupMCPOAuth(connection: ConnectionProfile, code: String) async throws -> MCPOAuthAuthorizationRequest {
@@ -543,7 +597,7 @@ final class ExternalCallClient {
         log.protect(request)
         let operation: String
         switch step {
-        case .roleRegistration: operation = path.first == "wake" ? String(localized: "读取或更新唤醒桥配置") : path.first == "oauth" ? String(localized: "处理 ChatGPT 授权") : String(localized: "登记或更新 MCP 联系人")
+        case .roleRegistration: operation = path.first == "wake" ? String(localized: "读取或更新唤醒桥配置") : path.first == "oauth" ? String(localized: "处理 MCP OAuth 授权") : String(localized: "登记或更新 MCP 联系人")
         case .device: operation = path.last == "remove" ? String(localized: "移除设备绑定") : String(localized: "绑定来电设备")
         case .schedule: operation = method == "GET" ? String(localized: "拉取定时来电计划") : path.last == "remove" ? String(localized: "删除定时来电计划") : String(localized: "保存定时来电计划")
         case .capabilities: operation = String(localized: "检查连接能力与联系人列表")
@@ -650,7 +704,7 @@ final class ExternalCallClient {
     private struct OAuthLookupRequest: Encodable { let user_code: String }
     private struct OAuthDecisionRequest: Encodable { let user_code: String; let contact_id: String?; let decision: String }
     private struct CallResponse: Decodable { let call: ExternalCallState }
-    private struct MCPRoleRequest: Encodable { let role_id: String; let contact_id: String; let display_name: String }
+    private struct MCPRoleRequest: Encodable { let role_id: String; let contact_id: String; let display_name: String; let mcp_wait_timeout_seconds: Int }
     private struct MCPContactModeRequest: Encodable { let role_id: String; let call_mode: CallMode }
     private struct MCPContactModeResponse: Decodable { let call_mode: CallMode }
     private struct MCPRoleResponse: Decodable {
@@ -660,6 +714,7 @@ final class ExternalCallClient {
         let token: String
         let token_created: Bool
         let mcp_path: String
+        let mcp_wait_timeout_seconds: Int?
     }
     private struct FailureResponse: Decodable { let error: Failure }
     private struct Failure: Decodable { let code: String }
@@ -672,14 +727,14 @@ final class ExternalCallClient {
     }
     private struct DeviceResponse: Decodable { let ok: Bool; let live_activity_push: Bool?; let call_access_expiry: Bool? }
     private struct ActivityPushResponse: Decodable { let accepted_by_apns: Bool }
-    private struct AnswerRequest: Encodable { let request_id: UUID; let epoch: Int; let expression_prompt: String; let user_name: String }
+    private struct AnswerRequest: Encodable { let request_id: UUID; let epoch: Int; let expression_prompt: String; let user_name: String; let time_awareness_enabled: Bool?; let time_zone: String? }
     private struct DeviceRequest: Encodable {
         let request_id: UUID; let device_id: UUID; let device_token: String; let environment: String
         let live_activity_start_token: String?
         let calls_valid_until: String?
     }
     private struct RemoveDeviceRequest: Encodable { let request_id: UUID; let device_id: UUID }
-    private struct CreateRequest: Encodable { let request_id: UUID; let call_id: UUID; let contact_id: String; let source: String; let expression_prompt: String; let user_name: String }
+    private struct CreateRequest: Encodable { let request_id: UUID; let call_id: UUID; let contact_id: String; let source: String; let expression_prompt: String; let user_name: String; let time_awareness_enabled: Bool?; let time_zone: String? }
     private struct InputRequest: Encodable { let request_id: UUID; let message_id: UUID; let epoch: Int; let text: String; let images: [ConnectorMessageImage]? }
     private struct SummaryRequest: Encodable { let request_id: UUID; let text: String }
     private struct ControlRequest: Encodable { let request_id: UUID; let epoch: Int; let reason: String }

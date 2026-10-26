@@ -29,12 +29,14 @@ MCP 工具调用与本文的手机 HTTP 接口是两套契约。本文说明后�
 
 | 数据 | Tincall 交付什么 | 后端如何使用 |
 | --- | --- | --- |
-| 用户输入 | 识别后的文字、手动文字，以及用户发送的图片；此接口不传麦克风原始音频流 | 送入自己选择的模型／工作流；图片按下文契约处理，不支持时明确报错 |
+| 对方输入 | 识别后的文字、手动文字，以及对方发送的图片；此接口不传麦克风原始音频流 | 送入自己选择的模型／工作流；图片按下文契约处理，不支持时明确报错 |
 | 通话与生成标识 | `call_id` 区分电话，`contact_id` 定位对象，`epoch` 区分代次；生成适配器另收到 `job_id`、消息历史和中断标记 | 自行维护人物与记忆，避免重试重复生成、旧回复进入新轮次；连接端传来的历史不包含接入方自己的跨通话记忆 |
 | 语音表达要求 | 手机拨出／接听时发送 `expression_prompt`；复用连接端时，每次生成请求都携带保存的值 | 放进模型上下文，指导输出适合当前 TTS 的文本；不替代人物设定，不是 TTS 密钥或语音参数接口 |
 | AI 回复 | 手机接收完整文字或追加增量，再按手机所选 TTS 合成、播放 | 返回真实回复，按协议表示完成／失败；不要求后端上传合成音频 |
 
 `expression_prompt` 默认由手机按 TTS 供应商和型号生成，用户可在该 TTS 配置的“语音表达提示词”中覆盖或留空关闭。例如 ElevenLabs 对应型号和 Fish Audio S2 使用各自的方括号表达规则，MiniMax Speech 2.8 使用圆括号语气音与 `<#秒数#>` 停顿，其他型号使用对应规则。接入方直接采用收到的内容即可，不必自行复制一套供应商判断。当前契约在拨出／接听时确定该值，没有通话中实时切换提示词的独立更新接口。
+
+开启联系人时间感知后，手机在提交的输入文字前加一行 `[yyyy-MM-dd HH:mm:ss]`，使用该消息的手机本地时间。后端生成请求的 `messages[].text` 保留这一前缀；连接端不额外向后端注入时间提示词，由后端决定如何纳入上下文。手机会清理回复中行首的这类协议时间标记，避免显示和朗读。MCP 则将输入前缀转为 `<message timestamp="...">` 属性，格式见[图片消息](message_images.md)。
 
 ### 可选能力与通话通知
 
@@ -50,7 +52,7 @@ MCP 工具调用与本文的手机 HTTP 接口是两套契约。本文说明后�
 
 ## ChatGPT MCP OAuth
 
-自有连接端同时支持原有 Bearer 和 ChatGPT 的 OAuth 授权码 + S256 PKCE。部署需包含 `202610200003_tincall_mcp_oauth.sql`、`202610200004_tincall_call_presence.sql` 和共享 `oauth.mjs`。完整端点、期限、原生联系人授权与部署方式见 [连接端说明](../connector/README.md#chatgpt-oauth)。OAuth 令牌只能访问已授权联系人的 MCP 路由，不能替代手机令牌访问本文的备份、设备或管理接口。
+自有连接端同时支持原有 Bearer 和 ChatGPT 的 OAuth 授权码 + S256 PKCE。部署需包含 `202610200003_tincall_mcp_oauth.sql`、`202610200004_tincall_call_presence.sql` 和共享 `oauth.mjs`。完整端点、期限、原生联系人授权与部署方式见 [连接端说明](../connector/README.md#chatgpt--claude-oauth)。OAuth 令牌只能访问已授权联系人的 MCP 路由，不能替代手机令牌访问本文的备份、设备或管理接口。
 
 ## 通用约定
 
@@ -93,11 +95,12 @@ MCP 工具调用与本文的手机 HTTP 接口是两套契约。本文说明后�
 
 ### GET /capabilities
 
-无请求体。手机检查连接并获取联系人列表。连接端返回：
+无请求体。手机检查连接并获取联系人列表。`server_version` 是部署版本，与协议字段 `version` 分开；Tincall 云端将它与 App 内所需版本比较，缺少该字段或版本过旧时提示按原部署方式更新服务。连接端返回示例：
 
 ```json
 {
   "version": 1,
+  "server_version": 2026102601,
   "owner_id": "10000000-0000-4000-8000-000000000001",
   "events": "poll",
   "max_event_page": 100,
@@ -118,7 +121,7 @@ App 一键部署的 Supabase 是通话连接端，不自带人物回复生成。
 
 复用 Tincall 连接端时，后端模式必须绑定 `mode: "http"` 对象；误用 MCP 的 `tools` 对象时，创建通话和提交输入均返回 `backend_binding_required`（422）。能力列表与拨号复用同一校验：缺少生成／取消地址、URL 无效、HTTPS 不符或取消地址不同源时，`generation_configured` 和 `wake_supported` 均为 false。非法 URL 返回 `generation_url_invalid`（422）。完整自建后端按本节实现手机协议即可，内部不要求使用这套绑定配置。
 
-请求体：`request_id`（UUID，手机此处与 `call_id` 相同）、`call_id`（UUID）、`contact_id`（1–200 字符字符串）、`source`（后端模式为 `backend`）、`expression_prompt`（字符串，语音表达提示，可为空）。
+请求体：`request_id`（UUID，手机此处与 `call_id` 相同）、`call_id`（UUID）、`contact_id`（1–200 字符字符串）、`source`（后端模式为 `backend`）、`expression_prompt`（字符串，语音表达提示，可为空）、`user_name`（手机个人资料名字，可为空）。开启时间感知时另带 `time_awareness_enabled: true` 和 IANA 时区 `time_zone`。
 
 返回：`{"call": <call>}`，新通话为 `active`，初始 `epoch` 为 0；发出 `call.started` 事件。
 
@@ -130,7 +133,7 @@ App 一键部署的 Supabase 是通话连接端，不自带人物回复生成。
 
 ### POST /calls/{call_id}/answer
 
-请求体：`request_id`（UUID）、`epoch`（当前通话代次）、`expression_prompt`（字符串，可为空）。
+请求体：`request_id`（UUID）、`epoch`（当前通话代次）、`expression_prompt`（字符串，可为空）、`user_name`（手机个人资料名字，可为空）；开启时间感知时另带 `time_awareness_enabled: true` 和 `time_zone`（IANA 时区）。
 
 返回：`{"call": <call>}`，状态从 `ringing` 变为 `active`，发出 `call.started`，不递增 `epoch`。
 

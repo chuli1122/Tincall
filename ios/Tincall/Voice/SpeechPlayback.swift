@@ -270,6 +270,11 @@ final class SpeechPlayback {
         stitchingWaitIndex = nil
     }
 
+    private indirect enum Echo {
+        case yourVoice(String)
+        case onceMore(Echo)
+    }
+
     private func archiveSegment(_ index: Int) {
         guard retainsAudio, let onAudioReady, let segment = segments[index] else { return }
         let bytes = segment.archivePCM.count / 2 * 2
@@ -372,6 +377,8 @@ final class SpeechPlayback {
         // Reference completed audio instead of resending preceding text, which
         // was repeated in the next segment's returned audio.
         var body: [String: Any] = ["text": segment.value.text, "model_id": settings.elevenLabsModel]
+        let voiceSettings = try settings.voiceSettings()
+        if !voiceSettings.isEmpty { body["voice_settings"] = voiceSettings }
         if settings.supportsRequestStitching {
             let now = ProcessInfo.processInfo.systemUptime
             completedElevenLabsRequests.removeAll { now - $0.completedAt >= 2 * 60 * 60 }

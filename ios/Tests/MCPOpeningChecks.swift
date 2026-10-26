@@ -24,6 +24,8 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         var createRequests = 0
         var answerRequests = 0
         var submittedReply: UUID?
+        var inputTexts: [String] = []
+        var timePreferenceBodies: [[String: Any]] = []
         func state() -> [String: Any] {
             ["id":call.uuidString,"contact_id":contactID,"source":source,"status":ended ? "ended" : "active","epoch":epoch,"last_sequence":available]
         }
@@ -50,6 +52,23 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "mcp-opening.invalid" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if request.url!.path == "/calls" || request.url!.path.hasSuffix("/answer") {
+            var data = request.httpBody ?? Data()
+            if data.isEmpty, let stream = request.httpBodyStream {
+                stream.open(); defer { stream.close() }
+                var bytes = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let count = stream.read(&bytes, maxLength: bytes.count)
+                    precondition(count >= 0)
+                    if count == 0 { break }
+                    data.append(contentsOf: bytes.prefix(count))
+                }
+            }
+            if !data.isEmpty {
+                let body = try! JSONSerialization.jsonObject(with: data) as! [String: Any]
+                Self.fixture.lock.withLock { Self.fixture.timePreferenceBodies.append(body) }
+            }
+        }
         if request.url!.path == "/calls", request.httpMethod == "POST" {
             Self.fixture.lock.withLock { Self.fixture.createRequests += 1 }
             client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 409, httpVersion: nil,
@@ -111,6 +130,7 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
                     }
                 }
                 let input = try! JSONSerialization.jsonObject(with:data) as! [String:Any]
+                f.inputTexts.append(input["text"] as! String)
                 f.epoch += 1
                 return ["call":f.state(),"input_id":input["message_id"]!,"reply_id":UUID().uuidString,"epoch":f.epoch]
             }
@@ -205,6 +225,135 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         call.onSaveRecord = { _ in }
         let f = OpeningProtocol.fixture
         let callID = f.lock.withLock { f.call }
+        if CommandLine.arguments.contains("--unanswered-inputs-only") {
+            f.lock.withLock { f.available = 0 }
+            try await call.prepareIncoming(callID: callID, role: role, connector: connector,
+                connections: [connector, stt, tts], retention: AudioRetention())
+            try await call.confirmIncoming(callID: callID)
+            try await call.activatePreparedIncoming(callID: callID)
+            call.setSpeechInterruptionEnabled(false)
+            let identity = call.session!
+            let first = TranscriptResult(inputID: UUID(), text: "First unanswered sentence", isFinal: true)
+            let second = TranscriptResult(inputID: UUID(), text: "A follow-up before any reply", isFinal: true)
+            voice.onEvent?(.transcript(identity, first))
+            try await until { call.record?.externalPendingInput == nil && f.lock.withLock { f.inputTexts.count == 1 } }
+            voice.onEvent?(.transcript(identity, second))
+            try await Task.sleep(for: .milliseconds(300))
+            precondition(f.lock.withLock { f.inputTexts == [first.text, second.text] },
+                "An unanswered MCP message must not block the next spoken message when speech interruption is off")
+            precondition(call.record!.messages.filter { $0.role == .user }.map(\.text) == [first.text, second.text])
+            precondition(call.pendingInputCount == 0 && call.isCallActive && voice.appended.isEmpty)
+            call.setSpeechInterruptionEnabled(true)
+            let third = TranscriptResult(inputID: UUID(), text: "Another sentence", isFinal: true)
+            let fourth = TranscriptResult(inputID: UUID(), text: "Before the previous upload returns", isFinal: true)
+            voice.onEvent?(.transcript(identity, third))
+            voice.onEvent?(.transcript(identity, fourth))
+            precondition(call.sendText("A typed follow-up"))
+            precondition(call.sendText("One more typed message"))
+            try await until { call.record?.externalPendingInput == nil && call.pendingInputCount == 0 }
+            let expected = [first.text, second.text, third.text, fourth.text, "A typed follow-up", "One more typed message"]
+            precondition(f.lock.withLock { f.inputTexts == expected },
+                "Back-to-back speech and text must preserve every unacknowledged input in order")
+            precondition(call.record!.messages.filter { $0.role == .user }.map(\.text) == expected)
+            // The no-reply path must not bypass disabled speech interruption once a real reply arrives.
+            call.setSpeechInterruptionEnabled(false)
+            let turn = call.turns[callID]!
+            call.receiveDelta("An actual reply", turn: turn)
+            voice.onEvent?(.playback(turn, .playing))
+            let duringPlayback = TranscriptResult(inputID: UUID(), text: "Wait until playback ends", isFinal: true)
+            voice.onEvent?(.transcript(identity, duringPlayback))
+            precondition(call.pendingInputCount == 1 && call.turns[callID] == turn)
+            precondition(f.lock.withLock { f.inputTexts == expected })
+            call.complete(turn, status: .completed)
+            voice.onEvent?(.playback(turn, .drained))
+            try await until { call.record?.externalPendingInput == nil && call.pendingInputCount == 0 }
+            precondition(f.lock.withLock { f.inputTexts == expected + [duringPlayback.text] })
+            call.hangUp()
+            try await until { f.lock.withLock { f.ended } }
+            print("PASS: unanswered MCP inputs never block follow-ups; pending speech/text uploads stay ordered; real playback still respects speech interruption")
+            return
+        }
+        if CommandLine.arguments.contains("--time-awareness-only") {
+            let client = ExternalCallClient(credentials: credentials, configuration: configuration)
+            let user = CallMessage(turnID: UUID(), role: .user, text: "Meet on 2026-10-25 at 12:30.", createdAt: Date(timeIntervalSince1970: 0))
+            var pending = ExternalPendingInput(requestID: UUID(), messageID: user.id, replyMessageID: UUID(), epoch: 0,
+                timeZone: "Asia/Shanghai")
+            _ = try await client.input(connection: connector, callID: callID, pending: pending, text: user.text, createdAt: user.createdAt)
+            pending.timeZone = nil
+            _ = try await client.input(connection: connector, callID: callID, pending: pending, text: user.text, createdAt: user.createdAt)
+            precondition(f.lock.withLock { f.inputTexts } == ["[1970-01-01 08:00:00]\n" + user.text, user.text])
+            precondition(user.text == "Meet on 2026-10-25 at 12:30.")
+            for enabled in [true, false] {
+                let testVoice = OpeningVoice()
+                let testCall = CallCoordinator(voice: testVoice)
+                testCall.onSaveRecord = { _ in }
+                var testRole = role
+                testRole.timeAwarenessEnabled = enabled
+                do {
+                    _ = try await client.create(connection: connector, role: testRole, callID: callID, expressionPrompt: "")
+                    preconditionFailure("Synthetic create must return its busy response")
+                } catch let failure as ExternalCallFailure { precondition(failure.code == "call_busy") }
+                _ = try await client.answer(connection: connector, callID: callID, requestID: UUID(), epoch: 0, expressionPrompt: "",
+                    timeAwarenessEnabled: enabled)
+                for body in f.lock.withLock({ Array(f.timePreferenceBodies.suffix(2)) }) {
+                    precondition(body["time_awareness_enabled"] as? Bool == (enabled ? true : nil))
+                    precondition(body["time_zone"] as? String == (enabled ? TimeZone.autoupdatingCurrent.identifier : nil))
+                }
+                testCall.role = testRole
+                let id = UUID(), replyID = UUID()
+                let identity = VoiceSessionID(callID: id, epoch: UUID())
+                let message = CallMessage(id: replyID, turnID: UUID(), role: .assistant, text: "", status: .generating)
+                var record = CallRecord(id: id, roleID: role.id, roleName: role.name, callMode: .mcp)
+                record.messages = [message]
+                testCall.session = identity; testCall.phase = .active
+                testCall.records[id] = record; testCall.record = record
+                testCall.turns[id] = VoiceTurnID(session: identity, turnID: message.turnID, messageID: message.id)
+                testCall.externalReplyIDs[id] = replyID
+                testCall.generation = .generating
+                testCall.playback = .synthesizing
+                let first = "[2026-10-"
+                let second = "25 12:01:02]\nMeet on 2026-10-25 at 12:30."
+                let state = ExternalCallState(id: id, contact_id: "synthetic", source: "mcp", status: "active", epoch: 0, last_sequence: 3)
+                func page(_ sequence: Int, type: String, delta: String? = nil, text: String? = nil) -> ExternalEventPage {
+                    let payload = ExternalCallEvent.Payload(reply_id: replyID, input_id: nil, delta: delta, text: text,
+                        code: nil, reason: nil, epoch: nil, opening: true, submitted: nil)
+                    return ExternalEventPage(call: state, events: [ExternalCallEvent(sequence: sequence, call_id: id, epoch: 0, type: type, payload: payload)],
+                        cursor: sequence, has_more: sequence < 3)
+                }
+                try testCall.receiveExternalPage(page(1, type: "reply.delta", delta: first), session: identity)
+                precondition(testCall.record!.messages[0].text == (enabled ? "" : first))
+                precondition(testVoice.appended == (enabled ? "" : first))
+                try testCall.receiveExternalPage(page(2, type: "reply.delta", delta: second), session: identity)
+                try testCall.receiveExternalPage(page(3, type: "reply.completed", text: first + second), session: identity)
+                let expected = enabled ? "Meet on 2026-10-25 at 12:30." : first + second
+                precondition(testCall.record!.messages[0].text == expected && testVoice.appended == expected)
+                precondition(testCall.generation == .completed && testVoice.finished)
+                testCall.playback = .playing
+                let nextReply = UUID()
+                let queuedPayload = ExternalCallEvent.Payload(reply_id: nextReply, input_id: nil, delta: nil, text: first + second,
+                    code: nil, reason: nil, epoch: nil, opening: nil, submitted: true)
+                let queued = ExternalEventPage(call: state,
+                    events: [ExternalCallEvent(sequence: 4, call_id: id, epoch: 0, type: "reply.completed", payload: queuedPayload)],
+                    cursor: 4, has_more: false)
+                try testCall.receiveExternalPage(queued, session: identity)
+                precondition(testCall.record!.messages.last!.text == expected && testCall.externalReplyQueue.count == 1)
+                testCall.hangUp(remotely: true)
+            }
+            for code in ["call_busy", "contact_mode_mismatch", "role_identity_conflict", "idempotency_conflict", "call_ended", "stale_epoch"] {
+                let description = ExternalCallFailure(status: 409, code: code).errorDescription!
+                precondition(description.contains(code) && description.contains("\n"), "known conflicts must carry specific guidance and preserve the real code")
+            }
+            precondition(ExternalCallFailure(status: 409, code: "call_busy").errorDescription !=
+                ExternalCallFailure(status: 409, code: "contact_mode_mismatch").errorDescription)
+            for status in [401, 403, 404, 422, 429, 500, 503] {
+                let description = ExternalCallFailure(status: status, code: "unknown_error").errorDescription!
+                precondition(description.contains("unknown_error") && description.contains("\n"))
+            }
+            precondition(ExternalCallFailure(status: 409, code: "unknown_conflict").errorDescription!.contains("\n"))
+            print("PASS: phone-created input timestamps retain local text; split external timestamp prefixes never enter storage or speech; ordinary dates and disabled behavior remain intact")
+            print("PASS: create/answer time preferences are opt in; queued replies are cleaned; conflict and HTTP errors include specific guidance with original codes")
+            return
+        }
         if CommandLine.arguments.contains("--mcp-reentrant-failure-only") {
             for step in ["append", "finish"] {
                 let testVoice = OpeningVoice()
@@ -577,6 +726,8 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         try await until { f.lock.withLock { f.ended } }
         let model = ConnectionProfile(name: "Synthetic model", provider: .openAICompatible,
             endpoint: URL(string: "https://mcp-opening.invalid"), model: "synthetic")
+        DataSharingConsent.setAllowed(true, for: model)
+        defer { DataSharingConsent.setAllowed(false, for: model) }
         try credentials.write("synthetic-fixture-only", connectionID: model.id)
         defer { try? credentials.delete(connectionID: model.id) }
         var independentRole = CallRole(name: "Synthetic", modelConnectionID: model.id, sttConnectionID: stt.id, ttsConnectionID: tts.id)

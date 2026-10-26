@@ -40,7 +40,7 @@ Model, speech, and self-hosting costs depend on their respective providers; purc
 ## Get started
 
 1. **Install the iPhone app.** Download `*-selfsign-unsigned.ipa` from the [latest release](https://github.com/chuli1122/Tincall/releases/latest) and follow the [signing guide](docs/setup.en.md#install-a-self-signing-ipa) to re-sign and install it with your own signing credentials, without recompiling. You need an iPhone running iOS 26 or later, and a signing tool that correctly configures the app and extension identifiers and App Group. You can also [build from source](docs/setup.en.md#build-from-source) using a Mac and Xcode.
-2. **Configure recognition and speech.** Follow the [first-call setup](docs/setup.en.md#make-a-first-standalone-call) to add STT and TTS settings in the app, including the provider, model, and voice. TTS expression prompts have model-specific defaults and can be edited. Before using each external service connection, review its recipient and data disclosure and explicitly allow data sharing. A changed address or provider requires confirmation again.
+2. **Configure recognition and speech.** Follow the [first-call setup](docs/setup.en.md#make-a-first-standalone-call) to add STT and TTS settings in the app, including the provider, model, and voice. TTS expression prompts have model-specific defaults and can be edited. Expand Advanced Parameters in an ElevenLabs connection to adjust stability and similarity. Before using each external service connection, review its recipient and data disclosure and explicitly allow data sharing. A changed address or provider requires confirmation again.
 3. **Configure a contact.** In standalone mode, select a model and enter a persona. For MCP or backend mode, follow [Connect an external AI](docs/setup.en.md#connect-an-external-ai).
 4. **Test a complete call.** Check service and model availability, then verify audio capture, replies, playback, interruption, and hang-up.
 
@@ -85,10 +85,11 @@ Docker is also supported. The connector listens on loopback by default. The phon
 
 In the app, open Settings → Tincall Cloud → Deploy or update service, then deploy using your own project and a management token restricted to that project. Save the regular connection after deployment. Adding an MCP contact does not require redeployment. CLI deployment is also available; see the [deployment guide](docs/setup.en.md#supabase-from-a-computer).
 
-Updating the app does not update an existing cloud service. Upgrade through the original deployment method and preserve its tokens and data. Do not replace an existing configuration with a separate first-time setup. Image migrations are included in the app's deployment flow and CLI deployment; no manual SQL step is needed. See [image messages](docs/message_images.md). The base migration creates the private storage bucket and permissions used by recordings and images. Recording retention and backup must still be enabled separately.
+Updating the app does not update an existing cloud service. Tincall Cloud in Settings checks the service version. If an update is needed, upgrade through the original deployment method and preserve its tokens and data. Required database migrations are included in the app's deployment flow and CLI deployment; no manual SQL step is needed. See the [deployment guide](docs/setup.en.md#supabase-from-a-computer). The base migration creates the private storage bucket and permissions used by recordings and images. Recording retention and backup must still be enabled separately.
 
 ## Optional features and data
 
+- Time Awareness in a contact's Call Preferences lets the AI understand the time between messages. It is off by default and uses the phone's time.
 - Call text and summaries can be saved locally. Recording retention is opt-in for each side of the call. Cloud sync, recording backups, and background incoming calls are configured separately.
 - Local Data & Backups lets you separately clear recordings, message images, or all call records, with confirmation. This affects only local data; contacts, connection settings, cloud copies, and exported files remain. Image changes that conflict with cloud data require a manual sync choice.
 - Saved service, STT, and TTS connections can be deleted from the bottom of their edit screen. One confirmation removes local settings, credentials, and associated selections while preserving contacts, call records, and cloud data. Remote device unbinding runs in the background. An unreachable service does not block local deletion; the app explains that its remote binding may still need cleanup. Other services remain enabled. Wait until an active call or sync finishes before deleting a connection.
@@ -107,7 +108,8 @@ The [English setup guide](docs/setup.en.md) covers signing, a first call, connec
 | `ios/Tincall/Core/` | Model protocols, call coordination, external interfaces, context and summaries, credentials, deployment |
 | `ios/Tincall/Voice/` | Audio capture, VAD, STT, TTS, segmentation, playback, and audio routing |
 | `ios/Tincall/Features/`, `Storage/` | UI, configuration and records, backups, and cloud sync |
-| `ios/TincallCallWidget/`, `ios/LocalPackages/` | Live Activity extension and bundled third-party components |
+| `ios/TincallCallWidget/`, `ios/TincallCallIntents/` | Live Activity and system calling intent extensions |
+| `ios/LocalPackages/` | Bundled third-party components |
 | `connector/` | Node entry point, SQLite, adapters, installers, and optional Node push sender |
 | `supabase/functions/`, `supabase/migrations/` | Shared connector logic, Edge entry point, and database migrations |
 | `cloudflare/` | Optional push Worker |
@@ -119,6 +121,7 @@ The [English setup guide](docs/setup.en.md) covers signing, a first call, connec
 - [MCP tool parameters and behavior](docs/mcp.md)
 - [Backend HTTP protocol](docs/backend_api.md)
 - [Image messages](docs/message_images.md)
+- [iOS checks and CI coverage](docs/ios_checks.md)
 - [Development and testing: environment, commands, and scope](connector/README.md#checks-and-current-limits)
 - [Third-party components and assets](docs/third_party.md)
 

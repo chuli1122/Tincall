@@ -104,6 +104,8 @@ final class LocalConfigurationStore {
         try validateRole(role, connections: connections)
         var next = roles
         if let index = next.firstIndex(where: { $0.id == role.id }) {
+            // An editor opened before contact refresh must not discard its saved address.
+            role.systemCallPhoneNumber = next[index].systemCallPhoneNumber ?? role.systemCallPhoneNumber
             next[index] = role
         } else {
             next.append(role)
@@ -214,23 +216,42 @@ final class LocalConfigurationStore {
         defer { isRefreshingContacts = false }
         repeat {
             refreshContactsAgain = false
+            var next = roles
+            var usedNumbers = Set(roles.compactMap(\.systemCallPhoneNumber))
+            for index in next.indices where next[index].linkedContact != nil && next[index].systemCallPhoneNumber == nil {
+                let number = SystemCallContact.newPhoneNumber(excluding: usedNumbers)
+                next[index].systemCallPhoneNumber = number
+                usedNumbers.insert(number)
+            }
+            do {
+                if next != roles {
+                    try persist(connections: connections, roles: next, retention: retention, defaultSTTConnectionID: defaultSTTConnectionID)
+                }
+            } catch {
+                contactSyncIssue = String(localized: "联系人更新未保存，原资料已保留，请重试。")
+                return
+            }
             let expectedLinks = Dictionary(uniqueKeysWithValues: roles.compactMap { role in
-                role.usesSystemContactDetails ? role.linkedContact.map { (role.id, $0.identifier) } : nil
+                role.linkedContact.map { (role.id, $0.identifier) }
             })
             var snapshots: [String: LinkedContact] = [:]
             var failures: [String: String] = [:]
             for identifier in Set(expectedLinks.values) {
-                do { snapshots[identifier] = try await contactReader.read(identifier: identifier) }
+                let numbers = Dictionary(uniqueKeysWithValues: roles.compactMap { role -> (UUID, String)? in
+                    guard expectedLinks[role.id] == identifier, let number = role.systemCallPhoneNumber else { return nil }
+                    return (role.id, number)
+                })
+                do { snapshots[identifier] = try await contactReader.read(identifier: identifier, callNumbers: numbers) }
                 catch { failures[identifier] = error.localizedDescription }
             }
             let relevantFailures = failures.filter { identifier, _ in
-                roles.contains { $0.usesSystemContactDetails && expectedLinks[$0.id] == identifier && $0.linkedContact?.identifier == identifier }
+                roles.contains { expectedLinks[$0.id] == identifier && $0.linkedContact?.identifier == identifier }
             }
             do {
                 try mergeLinkedContacts(snapshots, expectedLinks: expectedLinks)
                 contactSyncIssues = Dictionary(uniqueKeysWithValues: roles.compactMap { role in
                     guard let identifier = role.linkedContact?.identifier,
-                          role.usesSystemContactDetails, let failure = relevantFailures[identifier] else { return nil }
+                          let failure = relevantFailures[identifier] else { return nil }
                     return (role.id, failure)
                 })
                 contactSyncIssue = relevantFailures.isEmpty ? nil : String(localized: "关联联系人未全部更新，已保留上次资料。\n\(relevantFailures.values.first ?? String(localized: "请检查通讯录权限或重新选择联系人。"))")
@@ -376,7 +397,7 @@ final class LocalConfigurationStore {
         self.connections = connections
         contactSyncIssues = contactSyncIssues.filter { id, _ in
             roles.contains {
-                $0.id == id && $0.usesSystemContactDetails
+                $0.id == id && $0.linkedContact != nil
                     && $0.linkedContact?.identifier == self.roles.first(where: { $0.id == id })?.linkedContact?.identifier
             }
         }

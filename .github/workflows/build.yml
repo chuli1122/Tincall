@@ -10,6 +10,48 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  ios-checks:
+    name: Standalone iOS checks
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run production-source Swift checks
+        run: python3 ios/Tests/run_checks.py --output "$RUNNER_TEMP/ios-checks"
+      - name: Upload check results and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-checks
+          path: |
+            ${{ runner.temp }}/ios-checks/*.log
+            ${{ runner.temp }}/ios-checks/results.json
+          retention-days: 7
+      - name: Upload production deployment transactions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-deployment-transactions
+          path: ${{ runner.temp }}/ios-checks/sql-transactions/*.sql
+          if-no-files-found: error
+          retention-days: 1
+  ios-deployment-sql:
+    name: iOS deployment SQL (PostgreSQL)
+    needs: ios-checks
+    if: ${{ always() && needs.ios-checks.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios-deployment-transactions
+          path: ${{ runner.temp }}/sql-transactions
+      - name: Run exported production transactions
+        run: python3 ios/Tests/SupabaseDeploymentSQLChecks.py "$RUNNER_TEMP/sql-transactions"
   tests:
     name: Tests
     runs-on: ubuntu-latest

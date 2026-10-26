@@ -12,7 +12,7 @@ import time
 transactions = Path(sys.argv[1])
 container = "tincall-deployment-sql-check"
 versions = ["202610110001", "202610110002", "202610140001", "202610160001",
-            "202610180001", "202610190001", "202610190002", "202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002"]
+            "202610180001", "202610190001", "202610190002", "202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001"]
 
 
 def sql(source, succeeds=True):
@@ -63,6 +63,12 @@ try:
     """)
     original = sql("select row_to_json(s)::text from public.tincall_schedules s;")
     for version in versions[7:]:
+        if version == "202610250001":
+            sql("""
+            insert into public.tincall_mcp_roles(owner_id,role_id,contact_id,display_name,token)
+              values('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002',
+                'synthetic-wait-upgrade','Synthetic wait upgrade','tcmcp_'||repeat('d',64));
+            """)
         source = (transactions / (version + ".sql")).read_text()
         sql(source)
         sql(source)  # A committed migration must safely resume after a lost response.
@@ -70,6 +76,8 @@ try:
     assert sql("select (to_jsonb(s)-'week_day')::text from public.tincall_schedules s;") == sql(
         "select '" + original.replace("'", "''") + "'::jsonb::text;")
     assert sql("select week_day is null from public.tincall_schedules;") == "t"
+    assert sql("select mcp_wait_timeout_seconds=120 and token='tcmcp_'||repeat('d',64) from public.tincall_mcp_roles where contact_id='synthetic-wait-upgrade';") == "t"
+    print("PASS: MCP wait preference migration preserves existing identities and credentials with a 120-second default")
     assert sql("select has_function_privilege('authenticated','public.tincall_command(text,jsonb,uuid)','execute');") == "f"
     assert sql("select has_function_privilege('service_role','public.tincall_command(text,jsonb,uuid)','execute');") == "t"
     assert sql("select has_table_privilege('authenticated','public.tincall_calls','select');") == "f"

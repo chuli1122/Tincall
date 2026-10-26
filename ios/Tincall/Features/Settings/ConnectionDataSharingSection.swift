@@ -14,21 +14,24 @@ struct DataSharingAgreementRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 4) {
+        HStack(alignment: .top, spacing: 6) {
             Button { isOn.toggle() } label: {
                 Image(systemName: isOn ? "checkmark.square.fill" : "square")
                     .font(.system(size: 20))
-                    .frame(width: 44, height: 44)
+                    .frame(width: 44, height: 44, alignment: .trailing)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel("同意上述数据发送")
             .accessibilityValue(isOn ? String(localized: "已勾选") : String(localized: "未勾选"))
             Text(agreement)
                 .font(.footnote).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .frame(minHeight: 44, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .tint(.accentColor)
         }
+        .padding(.trailing, 24)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 

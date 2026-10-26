@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chuli (GitHub: chuli1122) <https://github.com/chuli1122/Tincall>
 // SPDX-License-Identifier: LicenseRef-Tincall-Personal-Use
 
+import Intents
 import Observation
 import UIKit
 
@@ -14,8 +15,10 @@ final class TincallRuntime {
     private(set) var loadError: String?
     private(set) var cloudSync: CloudSyncStore?
     private(set) var cloudSyncLoadingError: String?
+    var launchCall: (intent: INIntent, roleID: UUID)?
     @ObservationIgnored private var isAppActive = false
     @ObservationIgnored private var lastAccessState: CallAccessState?
+    @ObservationIgnored private var donatedCallID: UUID?
     @ObservationIgnored private var automaticSync: AutomaticCloudSyncController?
     let incoming = IncomingCallController()
     let callActivity = CallActivityController()
@@ -57,6 +60,21 @@ final class TincallRuntime {
             self.configuration = configuration
             self.records = records
             self.coordinator = coordinator
+            coordinator.onStartOutgoingAudio = { [weak coordinator] session, role, audio in
+                try await incoming.startOutgoingCall(callID: session.callID, role: role, beginMedia: {
+                    guard coordinator?.session == session else { throw CancellationError() }
+                    try await voice.prepareIncomingAudio(session: session, configuration: audio)
+                }, releaseMedia: {
+                    guard coordinator?.session == session else { throw CancellationError() }
+                    try await voice.resumeAfterSystemAudioHandoff()
+                    guard coordinator?.session == session else { throw CancellationError() }
+                    try await voice.start(session: session, configuration: audio)
+                })
+            }
+            incoming.onEndOutgoing = { [weak coordinator] callID in
+                guard coordinator?.record?.id == callID else { return }
+                coordinator?.hangUp()
+            }
             callActivity.startObserving(coordinator)
             do { cloudSync = try CloudSyncStore(records: records) }
             catch { cloudSyncLoadingError = error.localizedDescription }
@@ -137,6 +155,7 @@ final class TincallRuntime {
             }
             incoming.onConnected = { callID in
                 try await coordinator.activatePreparedIncoming(callID: callID)
+                self.donateActiveCallContact()
             }
             incoming.onSetMuted = { callID, muted in
                 guard coordinator.phase == .active, coordinator.record?.id == callID else { throw CancellationError() }
@@ -170,6 +189,13 @@ final class TincallRuntime {
         }
         updateForegroundIncoming()
         requestAutomaticSync()
+    }
+
+    func donateActiveCallContact() {
+        guard let coordinator, coordinator.phase == .active, let record = coordinator.record,
+              record.id != donatedCallID, let role = configuration?.roles.first(where: { $0.id == record.roleID }) else { return }
+        donatedCallID = record.id
+        SystemCallContact.donateCall(role: role, callID: record.id, incoming: record.externalAnswerRequestID != nil)
     }
 
     private func updateForegroundIncoming() {
@@ -234,8 +260,31 @@ final class TincallRuntime {
 }
 
 final class TincallAppDelegate: NSObject, UIApplicationDelegate {
+    private let callIntentHandler = SystemCallIntentHandler()
+
+    func application(_ application: UIApplication, handlerFor intent: INIntent) -> Any? {
+        return intent is INStartCallIntent || intent is INStartAudioCallIntent ? callIntentHandler : nil
+    }
+
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         TincallRuntime.shared.load()
         return true
+    }
+
+    func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        // Resolve a cold external entry before SwiftUI renders its first page.
+        let intent: INIntent? = options.urlContexts.compactMap { SystemCallContact.intent(for: $0.url) }.first
+            ?? options.userActivities.compactMap { $0.interaction?.intent }.first
+        let runtime = TincallRuntime.shared
+        if let intent, let configuration = runtime.configuration,
+           let role = try? SystemCallContact.role(for: intent, roles: configuration.roles, records: runtime.records?.records ?? []) {
+            runtime.launchCall = (intent, role.id)
+        }
+        // SwiftUI has already installed its own delegate on the session's
+        // configuration. Returning that delegate makes SwiftUI wrap itself and
+        // recurse during scene connection. Supply a fresh configuration so
+        // SwiftUI can install its delegate exactly once.
+        return UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
     }
 }

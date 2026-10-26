@@ -13,7 +13,7 @@ actor SystemContactReader {
         CNContactEmailAddressesKey as CNKeyDescriptor
     ]
 
-    /// Only the explicit link toggle may request permission; background refresh must use read.
+    /// Only the explicit link toggle may request permission; refresh never prompts.
     func requestAccess() async throws -> Bool {
         switch CNContactStore.authorizationStatus(for: .contacts) {
         case .authorized, .limited:
@@ -47,11 +47,11 @@ actor SystemContactReader {
         return contacts
     }
 
-    /// Reads the selected contact's display details and a handle for CallKit matching.
-    /// Does not request access or log contact identifiers.
-    func read(identifier: String) throws -> LinkedContact {
+    /// Reads the selected contact. Saved links may also add their local call numbers.
+    /// Never requests access or logs contact identifiers; existing fields are preserved.
+    func read(identifier: String, callNumbers: [UUID: String] = [:]) throws -> LinkedContact {
         try checkAccess()
-        let contact: CNContact
+        var contact: CNContact
         do {
             contact = try store.unifiedContact(withIdentifier: identifier, keysToFetch: keys)
         } catch {
@@ -61,11 +61,56 @@ actor SystemContactReader {
             }
             throw TincallError(message: String(localized: "暂时无法更新联系人，已保留原资料，请稍后重试。"))
         }
-        let snapshot = Self.snapshot(from: contact)
+        var snapshot = Self.snapshot(from: contact)
         guard !snapshot.name.isEmpty else {
             throw TincallError(message: String(localized: "所选系统联系人没有姓名，请选择有姓名的联系人"))
         }
+        if let updated = Self.addingCallNumbers(to: contact, callNumbers: callNumbers) {
+            do {
+                let request = CNSaveRequest()
+                request.update(updated)
+                try store.execute(request)
+                contact = try store.unifiedContact(withIdentifier: identifier, keysToFetch: keys)
+                snapshot = Self.snapshot(from: contact)
+                guard callNumbers.values.allSatisfy({ number in
+                    snapshot.phoneNumbers?.contains(number) == true
+                }) else { throw TincallError(message: "contact_number_not_saved") }
+                guard callNumbers.allSatisfy({ id, number in
+                    let oldAddresses = SystemCallContact.previousEmailAddresses(for: id, number: number)
+                    return !contact.emailAddresses.contains { field in
+                        field.label == "Tincall" && oldAddresses.contains {
+                            $0.caseInsensitiveCompare(String(field.value)) == .orderedSame
+                        }
+                    }
+                }) else { throw TincallError(message: "contact_email_not_removed") }
+            } catch {
+                throw TincallError(message: String(localized: "无法写入 Tincall 通话号码，原有号码未改动。请检查通讯录权限，或联系人是否只读。"))
+            }
+        }
         return snapshot
+    }
+
+    nonisolated static func addingCallNumbers(to contact: CNContact, callNumbers: [UUID: String]) -> CNMutableContact? {
+        let updated = contact.mutableCopy() as! CNMutableContact
+        var changed = false
+        for (id, number) in callNumbers {
+            let oldAddresses = SystemCallContact.previousEmailAddresses(for: id, number: number)
+            let emailCount = updated.emailAddresses.count
+            updated.emailAddresses.removeAll { field in
+                field.label == "Tincall" && oldAddresses.contains {
+                    $0.caseInsensitiveCompare(String(field.value)) == .orderedSame
+                }
+            }
+            changed = changed || emailCount != updated.emailAddresses.count
+            let legacy = SystemCallContact.legacyPhoneNumber(for: id)
+            let previousCount = updated.phoneNumbers.count
+            updated.phoneNumbers.removeAll { $0.label == "Tincall" && $0.value.stringValue == legacy }
+            changed = changed || previousCount != updated.phoneNumbers.count
+            guard !updated.phoneNumbers.contains(where: { $0.value.stringValue == number }) else { continue }
+            updated.phoneNumbers.append(CNLabeledValue(label: "Tincall", value: CNPhoneNumber(stringValue: number)))
+            changed = true
+        }
+        return changed ? updated : nil
     }
 
     private func checkAccess() throws {
@@ -87,6 +132,8 @@ actor SystemContactReader {
                              familyName: familyName, givenName: givenName,
                              phoneNumber: contact.isKeyAvailable(CNContactPhoneNumbersKey)
                                 ? contact.phoneNumbers.first(where: { !$0.value.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })?.value.stringValue : nil,
+                             phoneNumbers: contact.isKeyAvailable(CNContactPhoneNumbersKey)
+                                ? contact.phoneNumbers.map { $0.value.stringValue } : nil,
                              emailAddress: contact.isKeyAvailable(CNContactEmailAddressesKey)
                                 ? contact.emailAddresses.first(where: { !String($0.value).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }).map { String($0.value) } : nil)
     }

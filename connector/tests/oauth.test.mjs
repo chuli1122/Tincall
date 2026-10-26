@@ -19,6 +19,7 @@ const directory=mkdtempSync(join(tmpdir(),'tincall-oauth-'));
 const container='tincall-oauth-test-'+process.pid;
 const base='https://fixture.invalid/functions/v1/tincall';
 const callback='https://chatgpt.com/connector_platform_oauth_redirect';
+const claudeCallback='https://claude.ai/api/mcp/auth_callback';
 // RFC 7636's published example verifies the protocol proof without test-only
 // production paths, external providers or file fingerprinting.
 const verifier='dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
@@ -34,6 +35,9 @@ async function request(path,{method='GET',token,json,form}={}){
 const post=(path,json,token)=>request(path,{method:'POST',json,token});
 async function register(overrides={}){
   const result=await post('/oauth/register',{redirect_uris:[callback],client_name:'ChatGPT',token_endpoint_auth_method:'none',...overrides});assert.equal(result.status,201,await result.clone().text());return (await result.json()).client_id;
+}
+async function registerClaude(overrides={}){
+  const result=await post('/oauth/register',{redirect_uris:[claudeCallback],client_name:'Claude',token_endpoint_auth_method:'none',...overrides});assert.equal(result.status,201,await result.clone().text());return (await result.json()).client_id;
 }
 async function pending(client=undefined,overrides={}){
   client??=await register();
@@ -90,6 +94,24 @@ test('MCP OAuth discovery works without a bearer at the Supabase-prefixed URL an
   }
   const rejected=await post('/oauth/register',{redirect_uris:['https://attacker.invalid/callback']});assert.equal(rejected.status,400);
   const malicious=await post('/oauth/register',{redirect_uris:[callback+'?forward=https://attacker.invalid']});assert.equal(malicious.status,400);
+  const claude=await post('/oauth/register',{redirect_uris:[claudeCallback],client_name:'Claude',token_endpoint_auth_method:'none'});assert.equal(claude.status,201);
+  const claudeQuery=new URLSearchParams({client_id:(await claude.json()).client_id,redirect_uri:claudeCallback,response_type:'code',resource:base+'/mcp',code_challenge:challenge,code_challenge_method:'S256'});
+  assert.equal((await request('/oauth/authorize?'+claudeQuery)).status,303);
+  assert.equal((await post('/oauth/register',{redirect_uris:[claudeCallback+'?state=unsafe']})).status,400);
+});
+
+test('Claude OAuth keeps the registered client label through owner approval',async()=>{
+  const client=await registerClaude();
+  const query=new URLSearchParams({client_id:client,redirect_uri:claudeCallback,response_type:'code',state:'claude-state',resource:base+'/mcp',scope:'tincall:mcp',code_challenge:challenge,code_challenge_method:'S256'});
+  const started=await request('/oauth/authorize?'+query);assert.equal(started.status,303);
+  const location=started.headers.get('location');const page=await request(location);assert.equal(page.status,200);
+  const text=await page.text();const code=text.match(/[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}/)[0];
+  const lookup=await post('/oauth/requests/lookup',{user_code:code},'phone');assert.equal(lookup.status,200);assert.equal((await lookup.json()).client_name,'Claude');
+  const decided=await post('/oauth/requests/decide',{user_code:code,contact_id:'contact-a',decision:'approve'},'phone');assert.equal(decided.status,200);
+  const consent=await request(location);assert.equal(consent.status,303);const redirect=new URL(consent.headers.get('location'));
+  assert.equal(redirect.origin,'https://claude.ai');assert.equal(redirect.pathname,'/api/mcp/auth_callback');assert.equal(redirect.searchParams.get('state'),'claude-state');assert.equal(redirect.searchParams.get('iss'),base);
+  const exchanged=await request('/oauth/token',{method:'POST',form:{grant_type:'authorization_code',client_id:client,code:redirect.searchParams.get('code'),redirect_uri:claudeCallback,resource:base+'/mcp',code_verifier:verifier}});
+  assert.equal(exchanged.status,200);assert.equal((await exchanged.json()).token_type,'Bearer');
 });
 
 test('owner approval exchanges once, binds one contact, survives service restart and cannot read management APIs',async()=>{

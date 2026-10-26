@@ -9,6 +9,7 @@ import {createMCP} from './mcp.mjs';
 export {ConnectorError} from './protocol.mjs';
 export {createSupabaseStore} from './supabase-store.mjs';
 import {createMCPOAuth,OAuthError} from './oauth.mjs';
+import serverVersion from './server-version.json' with {type:'json'};
 
 const MAX_IMAGE_BODY = 28 * 1024 * 1024;
 // Bounded well below the Edge request limit; also covers writes from other instances.
@@ -20,7 +21,7 @@ export function createConnector({store, config, schedule = promise => promise.ca
   const {runOwner, runWorker} = createCallJobs({store, config, fetcher, backendMessages: images.backendMessages});
   const {command, bindingFor, upsertMCPRole, ensureOpening, waitForEvents} =
     createCallCommands({store, config, schedule, runOwner, fetcher, images});
-  const {mcp, sse, ssePost, wakeEvents, waitForInput} = createMCP({store, command, ensureOpening, schedule, mcpContent});
+  const {mcp, sse, ssePost, wakeEvents, waitForInput} = createMCP({store, command, bindingFor, ensureOpening, schedule, mcpContent});
 
   async function incomingEvents(request,principal) {
     ensure(request.method==='GET','method_not_allowed',405);
@@ -133,7 +134,7 @@ export function createConnector({store, config, schedule = promise => promise.ca
           wake:{transport:'sse',url:baseURL+'/wake/events',headers:{Authorization:'Bearer '+saved.token},event:'wake'},
           input:{transport:'http',url:baseURL+'/wake/input',headers:{Authorization:'Bearer '+saved.token}},
           mcp:{transport:'streamable-http',url:baseURL+'/mcp/wake',headers:{Authorization:'Bearer '+saved.token}},
-          instructions:'Keep the wake connection outside AI tasks. Fetch input.url and drain has_more pages, deduplicating message IDs internally. Bind each AI task to input.call.id using the Tincall-Call-ID header in every MCP request for that task; never replace it with a later call. Keep the linked conversation context across wakes. Supply the AI only message names/text and image content; include voice_instructions when present at call start. Do not pass call IDs, reply targets, epochs or cursors to the AI. The AI replies with tincall_reply text, then finishes the task. On idle or ended, do not start a task.'});
+          instructions:'Keep the wake connection outside AI tasks. Fetch input.url and drain has_more pages, deduplicating message IDs internally. Bind each AI task to input.call.id using the Tincall-Call-ID header in every MCP request for that task; never replace it with a later call. Keep the linked conversation context across wakes. Supply the AI the content blocks in order: XML messages followed by their native images; include voice_instructions when present at call start. Do not pass call IDs, reply targets, epochs or cursors to the AI. The AI replies with tincall_reply text, then finishes the task. On idle or ended, do not start a task.'});
       }
       if(path==='/calls/incoming/events')return await incomingEvents(request,principal);
       if(path==='/mcp/wake'){ensure(principal.wake_bridge,'forbidden',403);return await mcp(request,principal);}
@@ -175,13 +176,13 @@ export function createConnector({store, config, schedule = promise => promise.ca
         for (const binding of saved.bindings) {
           if (!bindings.has(binding.contact_id) || bindings.get(binding.contact_id).mode === 'tools') bindings.set(binding.contact_id,binding);
         }
-        return json({version:1,...(!principal.contact_id?{owner_id:principal.owner_id}:{}),events:'poll',incoming_events:'sse',wake_bridge:'sse',max_event_page:100,reply_protocol:'append_only',
+        return json({version:1,server_version:serverVersion.server_version,...(!principal.contact_id?{owner_id:principal.owner_id}:{}),events:'poll',incoming_events:'sse',wake_bridge:'sse',max_event_page:100,reply_protocol:'append_only',
           mcp_role_management:!principal.contact_id,mcp_oauth:true,backup_only_deletion:!principal.contact_id,schedule_controls:true,
           bindings:[...bindings.values()].filter(b=>!principal.contact_id || b.contact_id===principal.contact_id).map(b=>{
             let configured = false;
             try { validateBinding(b); configured = true; }
             catch(error) { if (!(error instanceof ConnectorError)) throw error; }
-            return {contact_id:b.contact_id,...(typeof b.display_name==='string' && b.display_name.trim()?{display_name:b.display_name.trim()}:{}),mode:b.mode,generation_configured:configured,wake_supported:configured && b.mode==='http'};
+            return {contact_id:b.contact_id,...(typeof b.display_name==='string' && b.display_name.trim()?{display_name:b.display_name.trim()}:{}),...(b.mcp_wait_timeout_seconds !== undefined ? {mcp_wait_timeout_seconds:b.mcp_wait_timeout_seconds} : {}),mode:b.mode,generation_configured:configured,wake_supported:configured && b.mode==='http'};
           }),
           push_configured:Boolean(config.pushURL && config.pushToken)});
       }

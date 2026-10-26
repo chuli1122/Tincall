@@ -93,6 +93,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
     @ObservationIgnored var onConnected: (@MainActor (UUID) async throws -> Void)?
     @ObservationIgnored var onSetMuted: ((UUID, Bool) async throws -> Void)?
     @ObservationIgnored var onEnd: ((UUID, CallRole?, ConnectionProfile) async -> Void)?
+    @ObservationIgnored var onEndOutgoing: ((UUID) -> Void)?
     @ObservationIgnored private let client: ExternalCallClient
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let settingsKey = "tincall.incoming.configuration"
@@ -130,6 +131,9 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
         var activationTimeout: Task<Void, Never>?
         var ringMonitor: Task<Void, Never>?
         var mediaStarted = false
+        var isOutgoing = false
+        var startWaiter: CheckedContinuation<Void, Error>?
+        var startTimeout: Task<Void, Never>?
     }
 
     @MainActor private final class PushCompletion {
@@ -151,7 +155,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
         configuration.maximumCallGroups = 1
         configuration.maximumCallsPerCallGroup = 1
         configuration.supportedHandleTypes = [.generic, .phoneNumber, .emailAddress]
-        configuration.includesCallsInRecents = false
+        configuration.includesCallsInRecents = true
         self.provider = provider ?? CXProvider(configuration: configuration)
         super.init()
         self.provider.setDelegate(self, queue: .main)
@@ -234,12 +238,63 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
             throw TincallError(message: String(localized: "后台通话卡片尚未完成推送绑定，请更新云端服务"))
         }
         try await client.startCallActivity(connection: connection, callID: callID, deviceID: binding.deviceID,
-                                           avatarContactID: contactID, displayName: invitations[callID]?.role?.name ?? "Tincall")
+                                           avatarContactID: contactID, displayName: invitation.role?.displayName ?? "Tincall")
+    }
+
+    private enum Somewhere {
+        static let word = "somewhere"
     }
 
     func endAcceptedCall(_ id: UUID) {
-        guard invitations[id]?.mediaStarted == true else { return }
+        guard invitations[id]?.mediaStarted == true || invitations[id]?.isOutgoing == true else { return }
         finishInvitation(id, error: nil)
+    }
+
+    /// Register a real outgoing call, acquire media under the system grant, then
+    /// use the same independent-audio handoff as incoming calls. System Recents
+    /// describes this system-managed segment; the app records the full duration.
+    func startOutgoingCall(callID: UUID, role: CallRole,
+                           beginMedia: @MainActor () async throws -> Void,
+                           releaseMedia: @MainActor () async throws -> Void) async throws {
+        guard invitations.isEmpty, !Task.isCancelled else { throw CancellationError() }
+        invitations[callID] = Invitation(role: role, connection: nil, isOutgoing: true)
+        let background = UIApplication.shared.beginBackgroundTask(withName: "Outgoing call handoff")
+        defer { if background != .invalid { UIApplication.shared.endBackgroundTask(background) } }
+        do {
+            try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (waiter: CheckedContinuation<Void, Error>) in
+                    invitations[callID]?.startWaiter = waiter
+                    invitations[callID]?.startTimeout = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(5))
+                        guard !Task.isCancelled else { return }
+                        self?.finishInvitation(callID, error: TincallError(message: String(localized: "系统通话操作超时")))
+                    }
+                    let action = CXStartCallAction(call: callID, handle: SystemCallContact.handle(for: role))
+                    action.contactIdentifier = role.linkedContact?.identifier
+                    callController.request(CXTransaction(action: action)) { [weak self] error in
+                        guard let error else { return }
+                        Task { @MainActor in self?.finishInvitation(callID, error: error) }
+                    }
+                }
+                try Task.checkCancellation()
+                try await waitForSystemAudioActivation(callID: callID)
+                try await beginMedia()
+                guard invitations[callID] != nil, !Task.isCancelled else { throw CancellationError() }
+                invitations[callID]?.mediaStarted = true
+                provider.reportOutgoingCall(with: callID, connectedAt: Date())
+                try await requestSystemAudioRelease(callID: callID)
+                try await waitForSystemAudioRelease(callID: callID)
+                try Task.checkCancellation()
+                try await releaseMedia()
+                guard invitations[callID] != nil, !Task.isCancelled else { throw CancellationError() }
+                invitations.removeValue(forKey: callID)
+            } onCancel: {
+                Task { @MainActor [weak self] in self?.finishInvitation(callID, error: CancellationError()) }
+            }
+        } catch {
+            finishInvitation(callID, error: error)
+            throw error
+        }
     }
 
     func cancelAnsweringCall() {
@@ -575,6 +630,28 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
         }
     }
 
+    func provider(_ provider: CXProvider, perform action: CXStartCallAction) {
+        guard let invitation = invitations[action.callUUID], invitation.isOutgoing,
+              !invitation.isAnswering, let role = invitation.role else { action.fail(); return }
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .default,
+                options: [.allowBluetoothA2DP, .mixWithOthers])
+        } catch {
+            action.fail()
+            finishInvitation(action.callUUID, error: error)
+            return
+        }
+        invitations[action.callUUID]?.isAnswering = true
+        provider.reportCall(with: action.callUUID, updated: Self.callUpdate(for: role))
+        provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: Date())
+        action.fulfill()
+        invitations[action.callUUID]?.startTimeout?.cancel()
+        invitations[action.callUUID]?.startTimeout = nil
+        let waiter = invitations[action.callUUID]?.startWaiter
+        invitations[action.callUUID]?.startWaiter = nil
+        waiter?.resume()
+    }
+
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         guard let invitation = invitations[action.callUUID], let role = invitation.role, let connection = invitation.connection,
               let onPrepare, let onAccept, let onBeginMedia, let onReleaseMedia, let onConnected else { action.fail(); return }
@@ -667,6 +744,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
         if invitation?.isHandingOff == true { return }
         // An end action outside handoff is a user hangup.
         finishInvitation(action.callUUID, error: nil)
+        if invitation?.isOutgoing == true { onEndOutgoing?(action.callUUID) }
         if let connection = invitation?.connection { Task { await onEnd?(action.callUUID, invitation?.role, connection) } }
     }
 
@@ -687,6 +765,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
         if let callAction = action as? CXCallAction {
             let invitation = invitations[callAction.callUUID]
             finishInvitation(callAction.callUUID, error: TincallError(message: String(localized: "系统来电操作超时")))
+            if invitation?.isOutgoing == true { onEndOutgoing?(callAction.callUUID) }
             if let connection = invitation?.connection { Task { await onEnd?(callAction.callUUID, invitation?.role, connection) } }
         }
         action.fail()
@@ -695,6 +774,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
     func providerDidReset(_ provider: CXProvider) {
         for (id, invitation) in invitations {
             finishInvitation(id, error: TincallError(message: String(localized: "系统来电服务已重置")))
+            if invitation.isOutgoing { onEndOutgoing?(id) }
             if let connection = invitation.connection { Task { await onEnd?(id, invitation.role, connection) } }
         }
         systemAudioActive = false
@@ -724,8 +804,13 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
     }
 
     func systemCallDidEnd(_ id: UUID) {
-        guard invitations[id] != nil else { return }
+        guard let invitation = invitations[id] else { return }
         invitations[id]?.systemCallEnded = true
+        if invitation.isOutgoing, !invitation.isHandingOff {
+            finishInvitation(id, error: CancellationError())
+            onEndOutgoing?(id)
+            return
+        }
         completeHandoffIfReleased(id)
     }
 
@@ -787,14 +872,19 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
     private func finishInvitation(_ id: UUID, error: Error?) {
         guard let invitation = invitations.removeValue(forKey: id) else { return }
         if answeringCall?.id == id { answeringCall = nil }
-        onCancelRinging?(id)
+        if !invitation.isOutgoing { onCancelRinging?(id) }
+        invitation.startTimeout?.cancel()
+        invitation.startWaiter?.resume(throwing: error ?? CancellationError())
         invitation.releaseTimeout?.cancel()
         invitation.activationTimeout?.cancel()
         invitation.activationWaiter?.resume(throwing: error ?? CancellationError())
         invitation.ringMonitor?.cancel()
         invitation.releaseWaiter?.resume(throwing: error ?? CancellationError())
-        provider.reportCall(with: id, endedAt: Date(), reason: error == nil ? .declinedElsewhere : .failed)
-        if let error { report(error) }
+        if !invitation.systemCallEnded {
+            provider.reportCall(with: id, endedAt: Date(), reason: error == nil
+                ? (invitation.isOutgoing ? .remoteEnded : .declinedElsewhere) : .failed)
+        }
+        if let error, !invitation.isOutgoing { report(error) }
     }
 
     private func monitorRinging(_ id: UUID) {
@@ -830,15 +920,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
     private func saveSettings() throws { defaults.set(try JSONEncoder().encode(settings), forKey: settingsKey) }
 
     static func callerHandle(for role: CallRole?) -> CXHandle {
-        if let contact = role?.linkedContact {
-            if let phone = contact.phoneNumber?.trimmingCharacters(in: .whitespacesAndNewlines), !phone.isEmpty {
-                return CXHandle(type: .phoneNumber, value: phone)
-            }
-            if let email = contact.emailAddress?.trimmingCharacters(in: .whitespacesAndNewlines), !email.isEmpty {
-                return CXHandle(type: .emailAddress, value: email)
-            }
-        }
-        return CXHandle(type: .generic, value: role?.id.uuidString ?? "Tincall")
+        SystemCallContact.handle(for: role)
     }
 
     private static func callUpdate(for role: CallRole?) -> CXCallUpdate {
@@ -859,7 +941,7 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
 
     private func safeMessage(_ error: Error) -> String {
         if let error = error as? TincallError { return error.message }
-        if let error = error as? ExternalCallFailure { return String(localized: "来电连接失败（HTTP \(error.status)）") }
+        if let error = error as? ExternalCallFailure { return error.localizedDescription }
         return String(localized: "系统来电操作失败（\((error as NSError).code)）")
     }
 

@@ -89,10 +89,6 @@ extension RoleEditor {
                     refreshUneditedNameDrafts()
                 }
             }))
-            Text("系统来电横幅的头像由系统联系人提供；未关联系统联系人时，不会显示这里设置的头像。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
             if role.linkedContact != nil {
                 Divider()
                 Toggle("关联头像和姓名", isOn: Binding(get: { role.usesSystemContactDetails }, set: { enabled in
@@ -130,7 +126,7 @@ extension RoleEditor {
 
     private var displayedContactIssue: String? {
         if let contactLinkIssue { return contactLinkIssue }
-        guard role.usesSystemContactDetails,
+        guard role.linkedContact != nil,
               store.roles.first(where: { $0.id == role.id })?.linkedContact?.identifier == role.linkedContact?.identifier else { return nil }
         return store.contactSyncIssues[role.id]
     }
@@ -216,7 +212,9 @@ extension RoleEditor {
         guard let identifier = role.linkedContact?.identifier else { return }
         let requestID = selectionRequestID
         do {
-            let snapshot = try await store.contactReader.read(identifier: identifier)
+            let savedRole = store.roles.first { $0.id == role.id && $0.linkedContact?.identifier == identifier }
+            let numbers = savedRole?.systemCallPhoneNumber.map { [role.id: $0] } ?? [:]
+            let snapshot = try await store.contactReader.read(identifier: identifier, callNumbers: numbers)
             guard editorIsActive, requestID == selectionRequestID, role.linkedContact?.identifier == identifier else { return }
             role.linkedContact = snapshot
             contactLinkIssue = nil

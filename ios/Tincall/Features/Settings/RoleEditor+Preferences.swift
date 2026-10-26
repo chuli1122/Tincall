@@ -144,9 +144,26 @@ extension RoleEditor {
             }
             if isLoadingBackground { ProgressView("正在处理通话背景…") }
             Divider()
-            HStack {
+            HStack(spacing: 6) {
                 Text("通话摘要模型")
-                Spacer()
+                if role.summaryConnectionID != nil {
+                    NavigationLink {
+                        RoleSummarySettings(role: role, isExisting: store.roles.contains(where: { $0.id == role.id }),
+                                            connection: store.connections.first { $0.id == role.summaryConnectionID },
+                                            records: records?.records ?? [], userName: store.userProfile.name,
+                                            hasUnsavedModelSelection: store.roles.first(where: { $0.id == role.id }).map { $0.summaryConnectionID != role.summaryConnectionID } ?? false,
+                                            onSave: saveSummaryPreferences)
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.footnote)
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 32, height: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("摘要提示词与长度")
+                }
+                Spacer(minLength: 0)
                 Menu {
                     Picker(String(localized: "通话摘要模型"), selection: $role.summaryConnectionID) {
                         Text("关闭").tag(nil as UUID?)
@@ -158,20 +175,6 @@ extension RoleEditor {
                 .buttonStyle(.plain)
                 .accessibilityLabel("通话摘要模型")
                 .accessibilityValue(summaryPresetName)
-            }
-            Text("可选。选择后，每次通话结束时会生成摘要，对方可通过连接端读取。")
-                .font(.caption).foregroundStyle(.secondary)
-            if role.summaryConnectionID != nil {
-                Divider()
-                NavigationLink {
-                    RoleSummarySettings(role: role, isExisting: store.roles.contains(where: { $0.id == role.id }),
-                                        connection: store.connections.first { $0.id == role.summaryConnectionID },
-                                        records: records?.records ?? [], userName: store.userProfile.name,
-                                        hasUnsavedModelSelection: store.roles.first(where: { $0.id == role.id }).map { $0.summaryConnectionID != role.summaryConnectionID } ?? false,
-                                        onSave: saveSummaryPreferences)
-                } label: {
-                    Text("摘要提示词与长度").foregroundStyle(Color.accentColor)
-                }
             }
         }
     }

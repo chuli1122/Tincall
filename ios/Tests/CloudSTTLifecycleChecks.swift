@@ -108,6 +108,8 @@ struct CloudSTTLifecycleChecks {
         try await client.start(callback: { _, _, _ in })
         let socket = URLSession.shared.sockets[0]
         socket.sendLatency = .milliseconds(25)
+        // The first send outlasts one frame; later sends complete faster.
+        socket.sendLatencies = [.milliseconds(80)]
         await MicrophoneCapture.active?.emit(Data(repeating: 1, count: 1280 * 8), speech: true)
         try await until { socket.sent.count >= 8 }
         let elapsed = socket.sentAt[0].duration(to: socket.sentAt[7])
@@ -350,11 +352,14 @@ struct CloudSTTLifecycleChecks {
     var sent: [Message] = []
     var sentAt: [ContinuousClock.Instant] = []
     var sendLatency: Duration = .zero
+    var sendLatencies: [Duration] = []
     private var messages: [Message] = []
     private var waiter: CheckedContinuation<Message, Error>?
     func resume() { state = .running }
     func send(_ message: Message) async throws {
         if closed { throw URLError(.networkConnectionLost) }
+        // Record entry before parsing the fixture's message.
+        let startedAt = ContinuousClock.now
         let isAudio: Bool
         switch message {
         case .data: isAudio = true
@@ -363,9 +368,10 @@ struct CloudSTTLifecycleChecks {
             isAudio = object?["data"] != nil
         }
         if failNextAudio && isAudio { failNextAudio = false; throw URLError(.networkConnectionLost) }
-        if sendLatency > .zero { try await Task.sleep(for: sendLatency) }
+        let latency = sendLatencies.isEmpty ? sendLatency : sendLatencies.removeFirst()
+        if latency > .zero { try await Task.sleep(for: latency) }
         sent.append(message)
-        sentAt.append(ContinuousClock.now)
+        sentAt.append(startedAt)
     }
     func receive() async throws -> Message {
         if !messages.isEmpty { return messages.removeFirst() }

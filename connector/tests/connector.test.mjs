@@ -101,6 +101,7 @@ before(async()=>{
   sql(readFileSync(new URL('../../supabase/migrations/202610210002_tincall_mcp_conversation.sql',import.meta.url),'utf8'));
   sql(readFileSync(new URL('../../supabase/migrations/202610200003_tincall_mcp_oauth.sql',import.meta.url),'utf8'));
   sql(readFileSync(new URL('../../supabase/migrations/202610220002_tincall_mcp_safety.sql',import.meta.url),'utf8'));
+  sql(readFileSync(new URL('../../supabase/migrations/202610250001_tincall_mcp_wait_preferences.sql',import.meta.url),'utf8'));
   sql(readFileSync(new URL('../../supabase/migrations/202610200001_tincall_schedule_controls.sql',import.meta.url),'utf8'));
   }
   upstream=createServer(async(req,res)=>{
@@ -224,14 +225,22 @@ test('MCP role enrollment persists identities and isolates live calls without de
   assert.equal(a.body.role_id,first.role_id);
   assert.equal(a.body.mcp_path,'mcp');
   assert.equal(a.body.token_created,true);
+  assert.equal(a.body.mcp_wait_timeout_seconds,120);
   assert.match(a.body.token,/^tcmcp_[0-9a-f]{64}$/);
   const b=await api('/mcp/roles/upsert',second);
   assert.equal(b.status,200);
   assert.notEqual(a.body.token,b.body.token);
-  const renamed=await api('/mcp/roles/upsert',{...first,display_name:'Renamed A'});
+  const renamed=await api('/mcp/roles/upsert',{...first,display_name:'Renamed A',mcp_wait_timeout_seconds:100});
   assert.equal(renamed.body.token,a.body.token);
   assert.equal(renamed.body.token_created,false);
   assert.equal(renamed.body.display_name,'Renamed A');
+  assert.equal(renamed.body.mcp_wait_timeout_seconds,100);
+  assert.equal((await api('/mcp/roles/upsert',{...first,display_name:'Renamed A'})).body.mcp_wait_timeout_seconds,100);
+  for (const mcp_wait_timeout_seconds of [0,131,1.5,'90',null]) {
+    const invalid=await api('/mcp/roles/upsert',{...first,mcp_wait_timeout_seconds});
+    assert.equal(invalid.status,400);
+    assert.equal(invalid.body.error.code,'invalid_mcp_wait_timeout_seconds');
+  }
   const duplicate=await api('/mcp/roles/upsert',{...first,role_id:crypto.randomUUID()});
   assert.equal(duplicate.status,409);
   assert.equal(duplicate.body.error.code,'role_identity_conflict');
@@ -247,6 +256,7 @@ test('MCP role enrollment persists identities and isolates live calls without de
   const directory=(await api('/capabilities')).body;
   assert.equal(directory.mcp_role_management,true);
   assert.equal(directory.bindings.find(binding=>binding.contact_id===first.contact_id).display_name,'Renamed A');
+  assert.equal(directory.bindings.find(binding=>binding.contact_id===first.contact_id).mcp_wait_timeout_seconds,100);
   assert.equal(directory.bindings.find(binding=>binding.contact_id===second.contact_id).mode,'tools');
   assert.equal(JSON.stringify(directory).includes(a.body.token),false);
   const scoped=(await api('/capabilities',undefined,a.body.token)).body;
@@ -392,7 +402,7 @@ test('MCP get_call announces a phone-origin call once without consuming unread i
     assert.doesNotMatch((await tool('tincall_get_call')).content[0].text,/打招呼|朗读要求/);
     await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:0,text:'Synthetic unread input.'}));
     assert.match((await tool('tincall_get_call')).content[0].text,/Synthetic unread input/);
-    assert.equal((await tool('tincall_wait',{timeout_seconds:1})).content[0].text,'小白：\nSynthetic unread input.');
+    assert.equal((await tool('tincall_wait',{timeout_seconds:1})).content[0].text,'<message name="小白">\n  <text>Synthetic unread input.</text>\n</message>');
   } finally {await tool('tincall_end',{call:callReference(id)});}
 });
 test('MCP first reply waits for new input instead of replaying the answer',async t=>{
@@ -414,7 +424,7 @@ test('MCP first reply waits for new input instead of replaying the answer',async
       const result=await pending;
       assert.equal(result.content.some(block=>block.text?.startsWith('call: ')),false,'a reply in a known call must not repeat its marker');
       const text=result.content[0].text;
-      assert.equal(text.split('\n\n')[0],'小白：\nSynthetic next question.');
+      assert.equal(text.split('\n\n')[0],'<message name="小白">\n  <text>Synthetic next question.</text>\n</message>');
       assert.doesNotMatch(text,/打招呼/);
       if(readFirst)assert.doesNotMatch(text,/朗读要求/);
     } finally {await tool('tincall_end',{call:callReference(id)});await pending;}
@@ -450,7 +460,7 @@ test('MCP wait and reply keep waiting through playback interruption',async t=>{
       }
       await new Promise(resolve=>setTimeout(resolve,1100));
       await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:1,text:'Synthetic next sentence.'}));
-      assert.deepEqual((await pending).content,[{type:'text',text:'小白：\nSynthetic next sentence.'}]);
+      assert.deepEqual((await pending).content,[{type:'text',text:'<message name="小白">\n  <text>Synthetic next sentence.</text>\n</message>'}]);
       const ending=tool('tincall_wait',{timeout_seconds:3});
       await api(`/calls/${id}/end`,mutation({epoch:2}));
       assert.equal((await ending).content[0].text,'通话已结束。');
@@ -477,7 +487,7 @@ test('MCP overlapping waits do not invent playback interruption after input deli
     pending=delayed.handle(new Request('http://localhost/mcp',{method:'POST',headers:{Authorization:'Bearer test-owner','Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'tincall_wait',arguments:{timeout_seconds:1}}})}));
     await polling;
     await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:0,text:'Synthetic next question.'}));
-    assert.equal((await tool('tincall_wait',{timeout_seconds:1})).content[0].text,'小白：\nSynthetic next question.');
+    assert.equal((await tool('tincall_wait',{timeout_seconds:1})).content[0].text,'<message name="小白">\n  <text>Synthetic next question.</text>\n</message>');
     release();
     const result=(await (await pending).json()).result;
     assert.equal(result.isError,false);
@@ -492,7 +502,7 @@ test('MCP complete text survives interruption and waits only for unread inputs',
   const id=crypto.randomUUID();await api('/calls',mutation({call_id:id,contact_id:'tools',source:'mcp',user_name:'小白',expression_prompt:'Speak naturally.'}));
   await tool('tincall_wait',{timeout_seconds:1});
   await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:0,text:'first question'}));
-  assert.equal((await tool('tincall_wait',{timeout_seconds:1})).content[0].text,'小白：\nfirst question');
+  assert.equal((await tool('tincall_wait',{timeout_seconds:1})).content[0].text,'<message name="小白">\n  <text>first question</text>\n</message>');
   await api(`/calls/${id}/interrupt`,mutation({epoch:1}));
   assert.equal((await tool('tincall_reply',{call:callReference(id),text:'A complete new reply after interruption.',wait_for_input:false})).isError,false);
   const record=(await api(`/calls/${id}/record`)).body;
@@ -508,7 +518,7 @@ test('MCP complete text survives interruption and waits only for unread inputs',
   }
   assert.equal(settled,false);
   await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:2,text:'next question'}));
-  assert.equal((await pending).content[0].text,'小白：\nnext question');
+  assert.equal((await pending).content[0].text,'<message name="小白">\n  <text>next question</text>\n</message>');
   const again=await tool('tincall_wait',{timeout_seconds:1});assert.match(again.content[0].text,/尚未回复/);assert.doesNotMatch(again.content[0].text,/next question|朗读要求/);
   // A reconnect uses persisted delivery progress, not process memory.
   const reconnected=createConnector({store,config:{},schedule:()=>{}});
@@ -561,7 +571,7 @@ test('MCP wait drains all unread pages internally without replay or caller curso
   for(let epoch=0;epoch<105;epoch++)await store.command(owner,'call.input',mutation({call_id:id,message_id:crypto.randomUUID(),epoch,text:'Synthetic '+epoch,mode:'tools'}));
   const tool=async()=>(await api('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'tincall_wait',arguments:{timeout_seconds:1}}},'test-owner',{Accept:'application/json, text/event-stream'})).body.result;
   const first=await tool();
-  assert.equal((first.content[0].text.match(/小白：/g)||[]).length,105);assert.doesNotMatch(JSON.stringify(first),/cursor|epoch|sequence|reply_to/);
+  assert.equal((first.content[0].text.match(/<message name="小白">/g)||[]).length,105);assert.doesNotMatch(JSON.stringify(first),/cursor|epoch|sequence|reply_to/);
   assert.match((await tool()).content[0].text,/尚未回复/);
   await store.command(owner,'call.end',mutation({call_id:id,epoch:105}));
 });
@@ -659,6 +669,9 @@ test('daily schedules preserve local clock time over DST and the worker creates 
   await api(`/calls/${current.id}/end`,mutation({epoch:0,reason:'hangup'}));
   assert.equal(generationCount,beforeGenerations);
   const daily=crypto.randomUUID();
+  const callPreferenceOnSchedule=await api('/schedules',mutation({schedule_id:daily,contact_id:'independent-fixture',source:'independent',daily_time:'09:00',time_zone:'Asia/Shanghai',time_awareness_enabled:true}));
+  assert.equal(callPreferenceOnSchedule.status,400);
+  assert.equal(callPreferenceOnSchedule.body.error.code,'invalid_time_awareness');
   assert.equal((await api('/schedules',mutation({schedule_id:daily,contact_id:'independent-fixture',source:'independent',daily_time:'09:00',time_zone:'Asia/Shanghai'}))).status,200);
   const saved=(await api('/schedules')).body.schedules.find(s=>s.id===daily);assert.equal(saved.daily_time,'09:00:00');assert.equal(saved.time_zone,'Asia/Shanghai');assert.equal(saved.enabled,true);
   assert.deepEqual((await api('/schedules/remove',mutation({schedule_id:daily}))).body,{ok:true});
@@ -910,10 +923,33 @@ test('MCP conversational output uses the phone user name without redundant recei
     await tool('tincall_reply',{call:callReference(id),text:'你好。',wait_for_input:false});
     await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:0,text:'下午好'}));
     const result=await tool('tincall_wait',{timeout_seconds:1});
-    assert.equal(result.content[0].text,'小白：\n下午好');
+    assert.equal(result.content[0].text,'<message name="小白">\n  <text>下午好</text>\n</message>');
   } finally {
     const current=(await api(`/calls/${id}/record`)).body.call;
     await api(`/calls/${id}/end`,mutation({epoch:current.epoch}));
+  }
+});
+test('MCP XML separates timestamps and names from text and keeps each image with its message',async()=>{
+  const tool=async(name,args={})=>(await api('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},'test-owner',{Accept:'application/json, text/event-stream'})).body.result;
+  for(const name of ['', '小白 "A" & <B>']) {
+    const id=crypto.randomUUID();
+    await api('/calls',mutation({call_id:id,contact_id:'tools',source:'mcp',user_name:name,time_awareness_enabled:true,time_zone:'Asia/Shanghai'}));
+    try {
+      await tool('tincall_wait',{timeout_seconds:1});
+      const raw='[2026-10-26 15:30:00]\n"A&B" <message>正文</message>\n原话提到 [2026-10-25 12:00:00]。';
+      await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:0,text:raw,images:[picture(),picture()]}));
+      const result=await tool('tincall_wait',{call:callReference(id),timeout_seconds:1});
+      const nameAttribute=name?' name="小白 &quot;A&quot; &amp; &lt;B&gt;"':'';
+      assert.equal(result.content[0].text,`<message${nameAttribute} timestamp="2026-10-26 15:30:00">\n  <text>"A&amp;B" &lt;message&gt;正文&lt;/message&gt;\n原话提到 [2026-10-25 12:00:00]。</text>\n</message>`);
+      assert.deepEqual(result.content.slice(1),Array.from({length:2},()=>({type:'image',data:pngData,mimeType:'image/png'})));
+      await api(`/calls/${id}/input`,mutation({message_id:crypto.randomUUID(),epoch:1,text:'[2026-10-26 15:31:00]\n',images:[picture()]}));
+      const onlyImage=await tool('tincall_wait',{call:callReference(id),timeout_seconds:1});
+      assert.equal(onlyImage.content[0].text,`<message${nameAttribute} timestamp="2026-10-26 15:31:00">\n  <text></text>\n</message>`);
+      assert.equal(onlyImage.content[1].type,'image');
+    } finally {
+      const current=(await api(`/calls/${id}/record`)).body.call;
+      await api(`/calls/${id}/end`,mutation({epoch:current.epoch}));
+    }
   }
 });
 test('phone images persist, reach every MCP input path, and reject invalid uploads without accepting input',async()=>{
@@ -935,7 +971,7 @@ test('phone images persist, reach every MCP input path, and reject invalid uploa
     const result=(await tool(name,name==='tincall_wait'?{timeout_seconds:1}:{call_id:callID})).body.result;
     assert.equal(result.isError,false);
     assert.deepEqual(result.content.filter(item=>item.type==='image'),[{type:'image',data:pngData,mimeType:'image/png'}]);
-    assert.ok(!result.content[1].text.includes(saved.id));assert.match(result.content[1].text,/图片 1/);
+    assert.equal(result.content[1].type,'image','each image immediately follows its message');
     assert.ok(result.content[0].text.includes(saved.text));assert.doesNotMatch(JSON.stringify(result),/reply_to|cursor|epoch/);
   }
   assert.equal((await tool('tincall_get_call',{call_id:callID},'test-role')).body.result.isError,true);
@@ -974,9 +1010,10 @@ test('phone images persist, reach every MCP input path, and reject invalid uploa
   assert.equal(next.isError,false);assert.equal(next.content.filter(block=>block.type==='image').length,1);
   assert.deepEqual(next.content.filter(item=>item.type==='image'),[{type:'image',data:pngData,mimeType:'image/png'}]);
   const history=(await tool('tincall_get_call',{call_id:callID})).body.result;
-  assert.ok(history.content[0].text.includes('用户（图片组 1）'));
-  assert.ok(history.content[0].text.includes('用户（图片组 2）'));
-  assert.ok(history.content.some(item=>item.type==='text' && item.text==='图片组 2 · 图片 1'));
+  const imagePositions=history.content.flatMap((block,index)=>block.type==='image'?[index]:[]);
+  assert.equal(imagePositions.length,2);
+  assert.match(history.content[imagePositions[0]-1].text,/<message>\n  <text>synthetic caption<\/text>\n<\/message>$/);
+  assert.match(history.content[imagePositions[1]-1].text,/<message>\n  <text><\/text>\n<\/message>$/);
   await api(`/calls/${callID}/end`,mutation({epoch:2}));
 });
 
@@ -1058,7 +1095,8 @@ test('MCP preserves reply acceptance when the next image cannot be loaded and de
   assert.equal(result.isError,false);assert.match(result.content[0].text,/回复已保存/);assert.match(result.content[0].text,/media_unavailable/);
   assert.equal(result.structuredContent,undefined);
   const recovered=(await api('/mcp',{jsonrpc:'2.0',id:2,method:'tools/call',params:{name:'tincall_wait',arguments:{timeout_seconds:1}}},'test-owner',{Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'})).body.result;
-  assert.match(recovered.content[0].text,/Synthetic supplement/);
+  assert.deepEqual(recovered.content.slice(0,3).map(block=>block.type),['text','image','text']);
+  assert.match(recovered.content[2].text,/Synthetic supplement/);
   assert.equal(recovered.content.filter(block=>block.type==='image').length,1);
   const saved=await api(`/records/${callID}`,mutation({expected_revision:0,record:{messages:(await api(`/calls/${callID}/record`)).body.messages}}));
   assert.equal(saved.status,200);

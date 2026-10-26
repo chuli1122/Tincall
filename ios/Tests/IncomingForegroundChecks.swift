@@ -6,7 +6,10 @@ import Foundation
 import AVFAudio
 import CallKit
 
-struct ExternalCallFailure: Error { let status: Int }
+struct ExternalCallFailure: LocalizedError {
+    let status: Int
+    var errorDescription: String? = "Synthetic connection guidance (HTTP 409)"
+}
 struct ExternalCallState: Sendable {
     let id = UUID()
     let contact_id = "synthetic-contact"
@@ -21,6 +24,7 @@ struct ExternalEventPage { let call: ExternalCallState }
 @MainActor final class ExternalCallClient {
     var reads = 0
     var activityStarts = 0
+    var activityNames: [String] = []
     var streams = 0
     var cancellations = 0
     var fails = false
@@ -61,7 +65,11 @@ struct ExternalEventPage { let call: ExternalCallState }
         if connection.id == registrationFailure { throw URLError(.notConnectedToInternet) }
         return liveActivityStartToken != nil
     }
-    func startCallActivity(connection: ConnectionProfile, callID: UUID, deviceID: UUID, avatarContactID: UUID, displayName: String) async throws { activityStarts += 1; if fails { throw URLError(.notConnectedToInternet) } }
+    func startCallActivity(connection: ConnectionProfile, callID: UUID, deviceID: UUID, avatarContactID: UUID, displayName: String) async throws {
+        activityStarts += 1
+        activityNames.append(displayName)
+        if fails { throw URLError(.notConnectedToInternet) }
+    }
     func prepareDeviceRemoval(connection: ConnectionProfile, deviceID: UUID, requestID: UUID) throws -> @MainActor () async throws -> Void {
         { try await self.removeDevice(connection: connection, deviceID: deviceID, requestID: requestID) }
     }
@@ -77,6 +85,10 @@ private final class AnswerProvider: CXProvider, @unchecked Sendable {
     var reportedUpdate: CXCallUpdate?
     var refreshedUpdate: CXCallUpdate?
     var ended = false
+    var startedConnecting = false
+    var connected = false
+    override func reportOutgoingCall(with UUID: UUID, startedConnectingAt dateStartedConnecting: Date?) { startedConnecting = true }
+    override func reportOutgoingCall(with UUID: UUID, connectedAt dateConnected: Date?) { connected = true }
     override func reportNewIncomingCall(with UUID: UUID, update: CXCallUpdate, completion: @escaping ((any Error)?) -> Void) {
         reportedID = UUID
         reportedUpdate = update
@@ -94,7 +106,9 @@ private final class AnswerAction: CXAnswerCallAction, @unchecked Sendable {
 
 private final class AnswerCallController: CXCallController, @unchecked Sendable {
     var onRequest: ((CXTransaction) -> Void)?
+    var failure: Error?
     override func request(_ transaction: CXTransaction, completion: @escaping (Error?) -> Void) {
+        if let failure { completion(failure); return }
         onRequest?(transaction)
         completion(nil)
     }
@@ -117,7 +131,9 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
         if CommandLine.arguments.contains("--activity-after-answer") { try await checkIncomingActivitySuppression(); return }
         if CommandLine.arguments.contains("--missed-call") { try await checkMissedCaller(); return }
         if CommandLine.arguments.contains("--answer") { try await checkAnswer(); return }
+        if CommandLine.arguments.contains("--outgoing") { try await checkOutgoing(); return }
         if CommandLine.arguments.contains("--consent") { try await checkIncomingConsent(); return }
+        if CommandLine.arguments.contains("--failure-guidance") { try await checkIncomingFailureGuidance(); return }
         var role = CallRole(name: "Synthetic")
         role.linkedContact = LinkedContact(identifier: "synthetic-id", name: "Synthetic", phoneNumber: " +12025550123 ", emailAddress: "fixture@example.invalid")
         precondition(IncomingCallController.callerHandle(for: role).type == .phoneNumber)
@@ -177,6 +193,36 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
         try await checkAnswer()
     }
 
+    @MainActor static func checkIncomingFailureGuidance() async throws {
+        let suite = "TincallIncomingFailureGuidance-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = ExternalCallClient(), provider = AnswerProvider(configuration: CXProviderConfiguration())
+        let controller = IncomingCallController(client: client, defaults: defaults, provider: provider)
+        let connection = ConnectionProfile(name: "Synthetic", provider: .genericConnector,
+                                           endpoint: URL(string: "https://synthetic.invalid"))
+        let role = CallRole(name: "Synthetic")
+        let failure = ExternalCallFailure(status: 409)
+        controller.canAcceptCall = { true }
+        controller.onResolveRole = { _, _, _ in role }
+        controller.onPrepare = { _, _, _ in throw failure }
+        controller.onAccept = { _, _, _ in preconditionFailure("Preparation failure must not accept the call") }
+        controller.onBeginMedia = { _, _, _ in preconditionFailure("Preparation failure must not start media") }
+        controller.onReleaseMedia = { _ in preconditionFailure("Preparation failure must not hand off media") }
+        controller.onConnected = { _ in preconditionFailure("Preparation failure must not connect the call") }
+        controller.monitorForeground(connections: [connection], active: true)
+        try await until { client.callbacks[connection.id] != nil }
+        client.callbacks[connection.id]?(ExternalCallState())
+        try await until { provider.reportedID != nil }
+        controller.provider(provider, perform: AnswerAction(call: provider.reportedID!))
+        try await until { controller.errorMessage != nil }
+        precondition(controller.errorMessage == failure.localizedDescription,
+                     "Incoming failures must preserve the error's complete action guidance and HTTP status")
+        precondition(controller.answeringCall == nil && provider.ended)
+        controller.monitorForeground(connections: [], active: false)
+        print("PASS: incoming preparation failures preserve full connection guidance and clean up the call")
+    }
+
     @MainActor static func checkIncomingConsent() async throws {
         let suite = "TincallIncomingConsent-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
@@ -219,14 +265,19 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
     }
 
     @MainActor static func checkInitialCallerHandle() async throws {
-        for (phone, email, expectedType, expectedValue) in [
-            (" +12025550123 ", "fixture@example.invalid", CXHandle.HandleType.phoneNumber, "+12025550123"),
-            (" ", " fixture@example.invalid ", .emailAddress, "fixture@example.invalid"),
-            (" ", " ", .generic, "")
+        for (phone, email, expectedType, expectedValue, hasCallNumber) in [
+            (" +12025550123 ", "fixture@example.invalid", CXHandle.HandleType.phoneNumber, "+12025550123", false),
+            (" ", " fixture@example.invalid ", .emailAddress, "fixture@example.invalid", false),
+            (" ", " ", .generic, "", false),
+            (" +12025550123 ", "fixture@example.invalid", .phoneNumber, "", true)
         ] {
             var savedRole = CallRole(name: "Synthetic")
             savedRole.linkedContact = LinkedContact(identifier: "synthetic-id", name: "Synthetic",
                                                     phoneNumber: phone, emailAddress: email)
+            let callNumber = "000123456789"
+            savedRole.systemCallPhoneNumber = callNumber
+            if hasCallNumber { savedRole.linkedContact?.phoneNumbers = [phone, callNumber] }
+            let expectedValue = hasCallNumber ? callNumber : expectedValue
             savedRole.syncSystemContactDetails = false
             let role = try JSONDecoder().decode(CallRole.self, from: JSONEncoder().encode(savedRole))
             let suite = "TincallInitialHandle-\(UUID())"
@@ -250,12 +301,12 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
             refreshed.linkedContact?.phoneNumber = nil
             refreshed.linkedContact?.emailAddress = "refreshed@example.invalid"
             controller.refreshReportedCallDetails(roles: [refreshed])
-            precondition(provider.refreshedUpdate?.remoteHandle?.type == .emailAddress)
-            precondition(provider.refreshedUpdate?.remoteHandle?.value == "refreshed@example.invalid")
+            precondition(provider.refreshedUpdate?.remoteHandle?.type == (hasCallNumber ? .phoneNumber : .emailAddress))
+            precondition(provider.refreshedUpdate?.remoteHandle?.value == (hasCallNumber ? callNumber : "refreshed@example.invalid"))
             controller.providerDidReset(provider)
             controller.monitorForeground(connections: [], active: false)
         }
-        print("PASS: initial report uses persisted phone, email-only or generic without Contacts refresh; supplemental report remains available")
+        print("PASS: initial and refreshed incoming reports prefer the saved Tincall number; legacy phone, email and generic remain available")
     }
 
     @MainActor static func checkConnectionRemoval() async throws {
@@ -385,6 +436,80 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
         print("PASS: declined, timed-out and reset invitations retain caller identity after removal")
     }
 
+    @MainActor static func checkOutgoing() async throws {
+        for scenario in ["connected", "cancelled", "rejected", "media-failed", "cancel-during-media", "system-ended", "reset"] {
+            let suite = "TincallOutgoingChecks-\(UUID())"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let provider = AnswerProvider(configuration: CXProviderConfiguration())
+            let system = AnswerCallController()
+            let controller = IncomingCallController(defaults: defaults, provider: provider, callController: system)
+            let callID = UUID()
+            let role = CallRole(name: "Synthetic outgoing")
+            var start: CXStartCallAction?
+            var end: CXEndCallAction?
+            var begins = 0, releases = 0, hangups = 0
+            var mediaWaiter: CheckedContinuation<Void, Never>?
+            controller.onEndOutgoing = { id in precondition(id == callID); hangups += 1 }
+            if scenario == "rejected" { system.failure = URLError(.cannotConnectToHost) }
+            system.onRequest = { transaction in
+                if let action = transaction.actions.first as? CXStartCallAction { start = action }
+                else if let action = transaction.actions.first as? CXEndCallAction {
+                    precondition(begins == 1 && provider.connected)
+                    end = action
+                    controller.provider(provider, perform: action)
+                } else { preconditionFailure("Unexpected system transaction") }
+            }
+            let task = Task {
+                try await controller.startOutgoingCall(callID: callID, role: role, beginMedia: {
+                    begins += 1
+                    if scenario == "cancel-during-media" { await withCheckedContinuation { mediaWaiter = $0 } }
+                    if scenario == "media-failed" { throw URLError(.cannotOpenFile) }
+                }, releaseMedia: { releases += 1 })
+            }
+            if scenario != "rejected" {
+                try await until { start != nil }
+                precondition(begins == 0, "Do not start recording before system audio activation")
+                if scenario == "cancelled" { task.cancel() }
+                else {
+                    controller.provider(provider, perform: start!)
+                    precondition(provider.startedConnecting && !provider.connected && begins == 0)
+                    if scenario == "system-ended" {
+                        controller.provider(provider, perform: CXEndCallAction(call: callID))
+                    } else if scenario == "reset" {
+                        controller.providerDidReset(provider)
+                    } else {
+                        controller.provider(provider, didActivate: AVAudioSession.sharedInstance())
+                        if scenario == "cancel-during-media" {
+                            try await until { mediaWaiter != nil }
+                            task.cancel()
+                            mediaWaiter?.resume()
+                        }
+                        if scenario == "connected" {
+                            try await until { end != nil }
+                            precondition(releases == 0 && hangups == 0)
+                            controller.systemCallDidEnd(callID)
+                            await Task.yield()
+                            precondition(releases == 0, "An end event alone must not release system audio")
+                            controller.provider(provider, didDeactivate: AVAudioSession.sharedInstance())
+                        }
+                    }
+                }
+            }
+            do {
+                try await task.value
+                precondition(scenario == "connected" && releases == 1 && hangups == 0)
+            } catch {
+                precondition(scenario != "connected" && releases == 0)
+                precondition((scenario != "system-ended" && scenario != "reset") || hangups == 1)
+            }
+            if scenario == "cancelled" || scenario == "rejected" || scenario == "system-ended" || scenario == "reset" {
+                precondition(begins == 0 && !provider.connected)
+            }
+        }
+        print("PASS: outgoing call registration, activation-before-recording, independent handoff, cancellation, rejection and media failure")
+    }
+
     @MainActor static func checkAnswer() async throws {
         for (initialActive, finalActive, missingActivity, pushFailure) in [(false, false, true, false), (true, true, true, false), (false, true, true, false), (true, false, true, false), (false, false, false, false), (false, false, true, true)] {
             let suite = "TincallAnswerChecks-\(UUID())"
@@ -395,7 +520,8 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
             let systemController = AnswerCallController()
             let connection = ConnectionProfile(name: "Synthetic", provider: .genericConnector,
                                                endpoint: URL(string: "https://synthetic.invalid"))
-            let role = CallRole(name: "Synthetic")
+            var role = CallRole(name: "")
+            role.linkedContact = LinkedContact(identifier: "synthetic-linked", name: "Synthetic linked caller")
             var settings = IncomingCallConfiguration()
             settings.enabled = true
             settings.bindings = [IncomingDeviceBinding(connectionID: connection.id, connection: connection)]
@@ -508,6 +634,8 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
             try await until { controller.answeringCall == nil }
             precondition(client.activityStarts == ((!finalActive && missingActivity) ? 1 : 0),
                          "Push only when connected in background with no existing activity")
+            precondition(client.activityNames.allSatisfy { $0 == role.displayName },
+                         "The background card must use the linked display name even when the manual name is empty")
             client.fails = false
             precondition(cancellations == 0 && controller.errorMessage == nil)
             controller.onAccept = { _, _, _ in

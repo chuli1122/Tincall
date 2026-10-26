@@ -37,6 +37,8 @@ import Foundation
                                       endpoint: URL(string: "https://synthetic.invalid"), model: "synthetic")
         let stt = ConnectionProfile(name: "Synthetic STT", provider: .appleSpeech)
         let tts = ConnectionProfile(name: "Synthetic TTS", provider: .elevenLabs, model: "eleven_v4", voiceID: "synthetic")
+        for connection in [model, tts] { DataSharingConsent.setAllowed(true, for: connection) }
+        defer { for connection in [model, tts] { DataSharingConsent.setAllowed(false, for: connection) } }
         try credentials.write("synthetic-control-key", connectionID: model.id)
         try credentials.write("synthetic-control-key", connectionID: tts.id)
         defer {

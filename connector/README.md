@@ -35,7 +35,7 @@ Supabase 一键部署／更新已打包 `202610200002_tincall_incoming_events.sq
 
 每条最多四张、每张解码后最多 5 MiB；支持 JPEG／PNG，HEIC 无转换能力时明确拒绝。Base64 不带 data URI 前缀，不换行。图片 UUID 及请求内容在重试时保持不变。有图可省略 `text` 或留空，无图仍按原文字协议处理。含图输入／备份 JSON 最大 28 MiB，无图仍为 8 MiB；手机负责 JPEG 长边不超过 1568、质量 0.8 的预处理。
 
-图片复用私有媒体存储，消息只保存 `{id,mime_type,bytes}` 引用。MCP 的读取／等待及回复后等待工具会返回标准 `{type:"image",data:"Base64",mimeType:"image/jpeg"}` content，并以文字块标明所属消息。后端生成请求在有图的 `messages[]` 项上增加 `images:[{mime_type,data_base64}]`；选择内联数据以避免签名链接过期和额外媒体鉴权，历史消息的图片也会转发。
+图片复用私有媒体存储，消息只保存 `{id,mime_type,bytes}` 引用。MCP 的读取／等待及回复后等待工具会返回标准 `{type:"image",data:"Base64",mimeType:"image/jpeg"}` content，原生图片块紧随所属消息的 XML 文字块。后端生成请求在有图的 `messages[]` 项上增加 `images:[{mime_type,data_base64}]`；选择内联数据以避免签名链接过期和额外媒体鉴权，历史消息的图片也会转发。
 
 备份 `record.messages[]` 或 `record.call.messages[]` 同样支持内联图片和已保存引用。`/delete` 会一并清理图片及同 UUID 通话图片引用；App 的清空云端备份使用 `/delete-backup`，保留仍被通话引用的图片。手机仍须上传真实文件并按引用下载恢复；仅有本机路径不能构成图片备份。
 
@@ -108,7 +108,7 @@ sh connector/install-local.sh --docker
 
 Docker 使用官方 Node 24 精简镜像，以非 root 用户运行，宿主机无需 Node；sh 版首次生成令牌需有 OpenSSL，Windows 版使用系统内置加密随机源。构建只发送必需源码，数据保存在命名卷 `tincall-local-data`。Docker 启动时需要联网下载镜像；Docker 本身也需配置开机启动。停止服务不会删除命名卷。不要执行 `docker compose down -v` 或手动删除该卷。
 
-两种方式默认仅在本机 `http://127.0.0.1:8787` 提供服务。端口可在私密 env 中修改 `TINCALL_LOCAL_PORT` 后重新运行。手机不能直接使用此地址；有公网地址和域名的服务器需配置 HTTPS 反向代理，转发到该本机地址，代理空闲超时需覆盖 MCP 最长 120 秒的等待请求。
+两种方式默认仅在本机 `http://127.0.0.1:8787` 提供服务。端口可在私密 env 中修改 `TINCALL_LOCAL_PORT` 后重新运行。手机不能直接使用此地址；有公网地址和域名的服务器需配置 HTTPS 反向代理，转发到该本机地址，代理空闲超时需长于联系人配置的 MCP 等待时长，并留出返回结果的余量。
 
 **没有公网地址的家用电脑**可启用 Cloudflare 快速隧道：
 
@@ -161,7 +161,7 @@ Tincall and AI platforms accept HTTPS addresses only. Choose one option below, t
 | An ngrok account | Configure your authtoken, then run `ngrok http 8787` | Yes | Yes |
 | A server with a public address and domain | A reverse proxy such as Caddy forwarding to port 8787 | Yes | Yes |
 
-With Tailscale, enable MagicDNS and HTTPS certificates in the admin console first. Reverse proxies must allow idle requests of at least 120 seconds for MCP waits. Quick tunnel URLs can change after a restart; update the app and the MCP settings when they do. The computer must stay on and awake.
+With Tailscale, enable MagicDNS and HTTPS certificates in the admin console first. Reverse proxies must allow idle requests longer than the contact's configured MCP wait, with room to return the result. Quick tunnel URLs can change after a restart; update the app and the MCP settings when they do. The computer must stay on and awake.
 
 Background service, log location and Docker volume details are in the Chinese section above.
 
@@ -240,6 +240,10 @@ It listens on `127.0.0.1:8787`. A deployed Node service requires your own TLS re
 
 ## Phone HTTP contract
 
+Authenticated `GET /capabilities` includes `server_version`, the deployment revision from `supabase/functions/_shared/tincall/server-version.json`. It is separate from the existing protocol `version: 1`. When a service lacks this field or reports a revision older than the App's bundled deployment, Settings → Tincall 云端 prompts the user to update the service; connection or authorization failures are reported separately.
+
+Increment the JSON revision when a new App release requires updated server behavior. Supabase uploads, the App's bundled deployment and the Node Docker image all include this same file. Updating the App does not deploy the service automatically.
+
 ### Local Codex voice backend
 
 `codex-backend.mjs` adapts a locally installed, authenticated Codex CLI to the HTTP generation/cancellation contract. Run it with `node connector/codex-backend.mjs /absolute/path/to/private-config.json`. The private JSON contains `command` (the Codex executable), `args` (options after `codex exec`), `cwd` (an empty working directory), `token` (a separate adapter credential), and optional `port` (default 8788). Keep this file outside version control. The adapter listens only on loopback; expose the **connector**, not this process, through your HTTPS entry point.
@@ -304,7 +308,7 @@ ordinary MCP connection alone does not install this workflow.
 
 **AI 启动命令的输入与配置约定：**
 
-- 标准输入只包含 `messages`（用户名和正文）、实际图片 `content`，以及接通时的简短提示；`voice_instructions` 仅在通话开始时提供一次。平台启动脚本应续接同一会话，保留人设和已收到的通话要求。
+- 标准输入的 `content` 按发言顺序包含 XML 文字块及紧随对应发言的原生图片块；不再另传重复的 `messages`。`<message>` 的 `name` 属性仅在名字非空时提供，开启时间感知时附带 `timestamp` 属性，`<text>` 保留原话。接通时另有简短提示；`voice_instructions` 仅在通话开始时提供一次。平台启动脚本读取 `content`，续接同一会话并保留人设和已收到的通话要求。
 - 专用 MCP 设置通过环境变量传给启动命令：`TINCALL_MCP_URL`、`TINCALL_MCP_TRANSPORT`、`TINCALL_MCP_HEADERS`（JSON 对象）。由你的启动脚本将它们完整映射到本次任务的平台 MCP 设置；请求头包含凭据和自动绑定原通话的 `Tincall-Call-ID`，不能只复制固定的 Authorization，也不能在旧任务里换成新通话。凭据和路由标识不要放进模型提示词、命令行参数或日志。HTTP MCP 的每个请求须带 `Accept: application/json, text/event-stream`；SSE 配置由支持该传输的平台处理。
 - 把发言和实际图片交给模型。AI 用 `tincall_reply({"text":"完整回复"})` 说话，然后结束本次任务；不需要回复编号、轮次或游标。首次收到的 `voice_instructions` 应随平台会话保留。
 - 命令必须在该 AI 任务结束后退出，正常完成返回退出码 0；不能只把任务丢到后台就退出。接入程序会确认回复目标已完成或已被新一轮替代。失败时重读并核对原目标，1 秒、2 秒后重试，最多三次尝试；整个任务含重试最多三分钟。目标失效或新通话到来时释放旧任务，不把旧文本换个目标重发。命令应处理 SIGTERM，并结束自己启动的 AI 子进程。
@@ -360,7 +364,7 @@ event) and MCP `content` blocks carrying the actual images. It drains `has_more`
 pages by sending `cursor.sequence` and `cursor.epoch` as `sequence` and `epoch`
 query parameters and deduplicates messages by ID before starting the AI. With
 `idle` or `ended`, do not start an AI task. For `answered` or `input`, start the
-AI with the collected names/text and actual images. Supply `voice_instructions`
+AI with the XML message blocks and their following native image blocks. Supply `voice_instructions`
 only when present at call start and retain the linked platform conversation.
 Keep all machine routing fields inside the adapter. The AI submits complete
 `text` through `tincall_reply`, which returns immediately in bridge mode, then
@@ -406,6 +410,12 @@ The connector makes one bounded POST per generation to the configured `generatio
 
 `Idempotency-Key` is the durable job UUID. The platform must deduplicate this job, use its configured role/history and cancel that same job when requested. The optional binding `token` is sent as a bearer credential only to the configured origin. Redirects are refused.
 
+With time awareness enabled, the phone prefixes incoming text with
+`[yyyy-MM-dd HH:mm:ss]` in its local time. Backend `messages[].text` retains that
+prefix; no extra time-awareness prompt is injected into backend generation. The
+phone removes these protocol timestamps from line starts in replies before
+display or speech. MCP presents the input timestamp as an XML attribute instead.
+
 `expression_prompt` carries the phone's saved speech-expression instructions on each generation request; the platform adapter should include it in the generation context. It does not replace the platform's persona/history. Backend calls require an HTTP binding: `tools` returns `backend_binding_required` before creating a call or accepting input. Capability discovery validates both URLs with the same rules used for calls; incomplete or invalid HTTP bindings are not advertised as ready.
 
 Return `application/json` with `{"text":"final reply"}`, or `application/x-ndjson` with append-only lines:
@@ -424,13 +434,13 @@ Cancellation retries network errors, HTTP 408/429 and 5xx up to three attempts, 
 
 MCP Streamable HTTP supports `initialize`, `ping`, `tools/list`, `tools/call` and initialization/cancellation notifications. It is stateless JSON transport; no long-lived SSE connection is required. Clients send both `application/json` and `text/event-stream` in Accept and the negotiated `MCP-Protocol-Version`. The six tools are `tincall_call`, `tincall_get_call`, `tincall_wait`, `tincall_reply`, `tincall_end`, and `tincall_list_calls`. HTTP origins are rejected unless explicitly listed in `TINCALL_ALLOWED_ORIGINS`.
 
-### ChatGPT OAuth
+### ChatGPT / Claude OAuth
 
-Update the function and apply migrations through `202610200005_tincall_contact_mode.sql` (or use the updated app's **部署或更新服务**). In ChatGPT, add the copied HTTP `/mcp` URL and choose OAuth; leave advanced client credentials blank and use dynamic registration. The authorization page shows an eight-character code. Open this saved cloud connection in Tincall → **ChatGPT 授权**, enter the code, select the registered MCP contact and approve. Return to the original browser page and refresh. Approval works across devices; refresh in the browser that started the connection.
+Update the function and apply migrations through `202610200005_tincall_contact_mode.sql` (or use the updated app's **部署或更新服务**). In ChatGPT, add the copied HTTP `/mcp` URL and choose OAuth; leave advanced client credentials blank and use dynamic registration. In Claude's custom connector, add the same `/mcp` URL, choose **Sign in now**, and choose **Register automatically** for the OAuth client. The authorization page shows an eight-character code. Open this saved cloud connection in Tincall → **MCP OAuth 授权**, enter the code, select the registered MCP contact and approve. Return to the original browser page and refresh. Approval works across devices; refresh in the browser that started the connection.
 
 Supabase's default domain rewrites HTML function responses to plain text, so consent is native in Tincall and the browser uses a text instruction page. No separate website or custom domain is required. This is MCP authorization, separate from the deployment PAT and Supabase management OAuth. The server never asks for the phone credential in a browser. Existing raw bearer clients continue to work.
 
-For Node behind a public HTTPS proxy/tunnel, configure `TINCALL_PUBLIC_URL` to its exact external connector base URL, with no trailing `/mcp`; otherwise the Node server only knows its internal loopback address. Supabase derives the standard gateway base automatically. Discovery is available under the base's `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`; unauthenticated MCP 401 responses advertise the resource metadata. The OIDC metadata route supports issuer paths beneath the Supabase gateway. Supported OAuth endpoints are `/oauth/register`, `/oauth/authorize`, `/oauth/consent`, `/oauth/token` and `/oauth/revoke`; phone-only JSON endpoints `/oauth/requests/lookup` and `/oauth/requests/decide` require the existing owner credential. DCR accepts exact ChatGPT HTTPS callback URLs only. Authorization requests last ten minutes; codes are single-use, bound to client/redirect/resource and PKCE. Access tokens expire after one hour; refresh tokens rotate with a thirty-day grant lifetime. OAuth credentials authorize MCP routes only, not backup, device or owner-management APIs.
+For Node behind a public HTTPS proxy/tunnel, configure `TINCALL_PUBLIC_URL` to its exact external connector base URL, with no trailing `/mcp`; otherwise the Node server only knows its internal loopback address. Supabase derives the standard gateway base automatically. Discovery is available under the base's `/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`; unauthenticated MCP 401 responses advertise the resource metadata. The OIDC metadata route supports issuer paths beneath the Supabase gateway. Supported OAuth endpoints are `/oauth/register`, `/oauth/authorize`, `/oauth/consent`, `/oauth/token` and `/oauth/revoke`; phone-only JSON endpoints `/oauth/requests/lookup` and `/oauth/requests/decide` require the existing owner credential. DCR accepts the exact ChatGPT callbacks and Claude's `https://claude.ai/api/mcp/auth_callback` callback. Authorization requests last ten minutes; codes are single-use, bound to client/redirect/resource and PKCE. Access tokens expire after one hour; refresh tokens rotate with a thirty-day grant lifetime. OAuth credentials authorize MCP routes only, not backup, device or owner-management APIs.
 
 A cloud account has one live-call slot. `call_busy` can concern a different contact, hidden from a contact-scoped credential; the MCP error now reports `scope:contact|account` and recovery guidance without exposing another contact's identity. The app's **云端当前通话** screen lets the owner inspect and explicitly end an abandoned call. Active phone event reads renew presence, including during silence; idle incoming subscriptions and MCP reads/replies do not. A call with no phone presence for three minutes ends with `reason:phone_disconnected` when the worker or next dial runs. Missed rings older than sixty seconds are also reclaimed on the next dial. A connected old call is retained; no extra idle polling is introduced.
 
@@ -441,8 +451,8 @@ The owner-only `POST /mcp/roles/mode` accepts `{role_id,call_mode}` with `standa
 SSE mailboxes are private, scoped to the authenticated owner/contact, and shared across Edge instances or Node processes. Streams send heartbeat comments and close after 120 seconds to leave headroom below the Free Edge worker lifetime; clients must reconnect and send `Last-Event-ID` to resume the same session. Sessions expire after three minutes without reads; recent delivered events are retained for reconnection, with bounded queues. Platforms that cannot reconnect reliably should use HTTP. Neither transport can override a platform's own tool timeout or automatically restart an idle AI.
 
 A platform-initiated call is `tincall_call → tincall_reply → … → tincall_end`.
-The dial stays pending until the phone answers, the call ends, or the two-minute
-wait expires. On answer it returns “通话已接通，可以打招呼了。” and the first-call
+The dial stays pending until the phone answers, the call ends, or the contact's
+configured wait expires (120 seconds by default). On answer it returns “通话已接通，可以打招呼了。” and the first-call
 voice instructions, so the AI can speak immediately. A timeout says whether the
 phone has not answered or the person has not spoken, and directs the AI to
 `tincall_wait`.
@@ -458,10 +468,16 @@ submit text only: their adapter supplies the fixed `Tincall-Call-ID` request hea
 Refresh tool definitions after applying the current migrations and function update.
 A repeated dial reuses the unfinished call.
 
-Ordinary tool results contain readable text and actual images, without duplicate
-`structuredContent`. User messages use the profile name sent by the phone, for
-example `小白：` followed by the message. They do not add receipt announcements
-or per-turn routing metadata. Opening or discovering a call and explicitly looking
+Ordinary tool results contain XML message text and actual images, without duplicate
+`structuredContent`. Incoming messages have an optional `name` from the phone
+profile; assistant history uses `name="TA"`. With time awareness enabled, incoming
+messages have a `timestamp` in the phone's local time (`yyyy-MM-dd HH:mm:ss`).
+`<text>` contains the original words, with XML metacharacters escaped. Blank
+names are omitted. Generating, interrupted or failed messages can also carry
+`status` and `reason` attributes. Native image
+blocks immediately follow their message; image-only messages have an empty
+`<text>`. Receipt announcements and per-turn routing metadata are not added.
+Opening or discovering a call and explicitly looking
 one up returns its short `call` marker; replies and waits that already specify it
 do not repeat the marker after each message. History lists and pagination links
 also use eight-character IDs: pass one as `call_id` to `tincall_get_call` to read
@@ -472,14 +488,51 @@ explicit `tincall_get_call` operation, with older-page links when needed.
 `tincall_list_calls` includes IDs only for deliberate history selection. Summaries
 are shown for ended calls when available; active calls do not claim a summary.
 
-A normal reply waits for the next input for up to 120 seconds. Use
+A normal reply waits for the next input using that contact's saved wait duration. Use
 `wait_for_input:false` to return immediately, such as before `tincall_end`.
 Successful immediate submission returns `已发送。`. If storing succeeds but
 waiting or loading the next image fails, the result says the reply was saved and
 to keep waiting, without resending it. A timeout does not hang up. Internal wait
 progress persists across service restarts, and failed media delivery does not
 consume unread inputs. Integration code can explicitly set `timeout_seconds`
-from 1–120; the model-facing schema omits that setting.
+from 1–130 to override the preference for one request; the model-facing schema
+omits that setting.
+
+### Choosing the MCP wait duration
+
+`POST /mcp/roles/upsert` accepts the optional integer
+`mcp_wait_timeout_seconds` (1–130). New and upgraded contacts default to 120
+seconds. Re-saving an existing role without this field preserves its saved value;
+the response and contact binding include the saved duration. A changed duration
+applies to subsequent `tincall_call`, `tincall_wait`, and waiting `tincall_reply`
+requests for that contact, including when an owner credential discovers the call.
+Changing it does not end an existing request or change wake-bridge replies into
+long waits. Supabase deployments need
+`202610250001_tincall_mcp_wait_preferences.sql` and the updated function;
+SQLite upgrades its column on startup. Existing tokens and call history remain.
+
+The contact editor accepts 1–130 seconds and adjusts out-of-range entries
+automatically. Set the platform's tool timeout longer than Tincall's wait,
+leaving time to return the result and issue the next wait.
+
+Kelivo defaults to a 30-second MCP timeout. Set it to 180 seconds in Kelivo's
+MCP settings, reconnect Tincall and keep Kelivo in the foreground during calls.
+
+Muse defaults to a 45-second tool wait and moves the tool invocation to the background at
+120 seconds. For Muse, set the Tincall contact's wait to 90 seconds and ask the
+AI in Muse to set its tool wait to 110 seconds. Tincall can return first; if it
+does not, Muse can report its timeout before moving the invocation to the background.
+Other platforms should use their own tool limits.
+
+The 130-second maximum is an application limit, not an assured hosting lifetime.
+[Supabase's current hosted limits](https://supabase.com/docs/guides/functions/limits)
+are a 150-second Free worker lifetime, 400 seconds on paid plans, and a
+150-second request idle timeout. A 130-second wait leaves at most 20 seconds for
+other work on a fresh Free worker; worker age, network latency, CPU limits and
+the client's own timeout can shorten it. The legacy SSE stream still rotates
+after 120 seconds and must
+resume with `Last-Event-ID`; its durable mailbox can deliver a pending tool result
+on the next stream. Stream rotation and tool suspension are separate clocks.
 
 `tincall_end` asks the phone to finish reading received text before hanging up.
 It does not claim that audio has already finished. Phone manual hangup remains

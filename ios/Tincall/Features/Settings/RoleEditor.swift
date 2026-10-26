@@ -15,6 +15,7 @@ struct RoleEditor: View {
     let records: CallRecordStore?
     let isCallActive: Bool
     let onRequestSummary: ((UUID) -> Void)?
+    let onDraftChange: ((CallRole) -> Void)?
     @State var nameDraft: String
     @State var savedRole: CallRole
     @State private var showsUnsavedChanges = false
@@ -48,18 +49,23 @@ struct RoleEditor: View {
     @State var mcpUsesSSE = false
     @State var isSavingRole = false
     @State private var saveRequestID: UUID?
+    @State private var saveFeedbackTrigger = 0
+    @State private var showsSavedFeedback = false
     @State var manualMCPContactID: String?
     @Environment(\.dismiss) var dismiss
     @Environment(\.openURL) var openURL
 
     init(role: CallRole, store: LocalConfigurationStore, records: CallRecordStore? = nil,
-         isCallActive: Bool = false, onRequestSummary: ((UUID) -> Void)? = nil) {
-        _role = State(initialValue: role)
+         isCallActive: Bool = false, onRequestSummary: ((UUID) -> Void)? = nil,
+         initialDraft: CallRole? = nil, onDraftChange: ((CallRole) -> Void)? = nil) {
+        let draft = initialDraft ?? role
+        _role = State(initialValue: draft)
         self.store = store
         self.records = records
         self.isCallActive = isCallActive
         self.onRequestSummary = onRequestSummary
-        _nameDraft = State(initialValue: role.name)
+        self.onDraftChange = onDraftChange
+        _nameDraft = State(initialValue: draft.name)
         _savedRole = State(initialValue: role)
     }
 
@@ -81,6 +87,7 @@ struct RoleEditor: View {
                 sectionHeading("02", "CALL PREFERENCES", title: String(localized: "通话偏好"))
                 voiceCard
                 backgroundAndSummaryCard
+                timeAwarenessCard
                 sectionHeading("03", "CONNECTION MODE", title: String(localized: "连接模式"))
                 modeCard
                 if let errorMessage {
@@ -121,6 +128,25 @@ struct RoleEditor: View {
         .toolbar(.hidden, for: .navigationBar)
         .disabled(isSavingRole)
         .modifier(CopySuccessFeedback())
+        .modifier(DeploymentHelpOverlay())
+        .overlay {
+            if showsSavedFeedback {
+                Label("已保存", systemImage: "checkmark")
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 11)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.08), radius: 8, y: 3)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeOut(duration: 0.15), value: showsSavedFeedback)
+        .task(id: saveFeedbackTrigger) {
+            guard saveFeedbackTrigger > 0 else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            showsSavedFeedback = false
+        }
         .background {
             ContactDismissGuard(isBlocked: isSavingRole, hasUnsavedChanges: hasUnsavedChanges, onAttempt: requestDismiss)
         }
@@ -187,6 +213,7 @@ struct RoleEditor: View {
 
     private func lifecyclePresentation<Content: View>(_ content: Content) -> some View {
         content
+        .onChange(of: roleWithDraftName, initial: true) { _, draft in onDraftChange?(draft) }
         .task(id: saveRequestID) {
             guard saveRequestID != nil else { return }
             await saveMCPRole()
@@ -197,7 +224,7 @@ struct RoleEditor: View {
             // Read both integrations when opening MCP settings; switching only changes presentation.
             guard mcpSetup.savedWakeConfiguration(connection: connection, contactID: role.mcpContactID) == nil else { return }
             guard !isCopyingWakeBridgeConfiguration else { return }
-            await mcpSetup.loadWakeConfiguration(connection: connection, contactID: role.mcpContactID)
+            await mcpSetup.loadWakeConfiguration(connection: connection, contactID: role.mcpContactID, role: savedWakeBridgeRole)
         }
         .onAppear {
             editorIsActive = true
@@ -297,21 +324,22 @@ struct RoleEditor: View {
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .accessibilityLabel("取消")
+                .accessibilityLabel("关闭")
                 Button(action: save) {
                     ZStack {
                         if isSavingRole { ProgressView().tint(Color(.systemBackground)) }
                         else { Image(systemName: "checkmark") }
                     }
                         .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color(.systemBackground))
+                        .foregroundStyle(canSaveChanges || isSavingRole ? Color(.systemBackground) : Color.secondary)
                         .frame(width: 32, height: 32)
-                        .background(Color.accentColor)
+                        .background(canSaveChanges || isSavingRole ? Color.accentColor : Color.clear)
+                        .overlay { Rectangle().stroke(canSaveChanges || isSavingRole ? Color.clear : Color.primary.opacity(0.25), lineWidth: 0.75) }
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .disabled(cannotSave)
-                .accessibilityLabel(isSavingRole ? String(localized: "正在配置 MCP") : String(localized: "完成"))
+                .disabled(!canSaveChanges)
+                .accessibilityLabel(isSavingRole ? String(localized: "正在保存") : String(localized: "保存"))
             }
             .buttonStyle(.plain)
         }
@@ -322,6 +350,24 @@ struct RoleEditor: View {
 
     var cannotSave: Bool {
         !hasDisplayName || isLinking || isLoadingPhoto || isLoadingBackground || selectedBackground != nil || isSavingRole
+    }
+
+    private var canSaveChanges: Bool {
+        !cannotSave && (hasUnsavedChanges || !store.roles.contains(where: { $0.id == role.id }))
+    }
+
+    private var timeAwarenessCard: some View {
+        card {
+            HStack(spacing: 6) {
+                Text("时间感知")
+                DeploymentHelpButton(title: "时间感知说明", detail: "开启后会把消息的发送时间告诉 TA，使用手机的时间和时区。", systemImage: "info.circle")
+                Spacer(minLength: 0)
+                Toggle("时间感知", isOn: Binding(
+                    get: { role.timeAwarenessEnabled == true },
+                    set: { role.timeAwarenessEnabled = $0 }))
+                    .labelsHidden()
+            }
+        }
     }
 
     var roleWithDraftName: CallRole {
@@ -346,7 +392,9 @@ struct RoleEditor: View {
     private func comparableRole(_ value: CallRole) -> CallRole {
         var value = value
         value.callMode = value.effectiveCallMode
+        value.mcpWakeBridgeEnabled = value.mcpWakeBridgeEnabled == true
         value.timeAwarenessEnabled = value.timeAwarenessEnabled == true
+        value.mcpWaitTimeoutSeconds = value.effectiveMCPWaitTimeoutSeconds
         value.contextCharacterBudget = value.effectiveContextCharacterBudget
         value.contextModuleOrder = value.effectiveContextModuleOrder
         value.historySummaryCount = min(5, max(0, value.historySummaryCount ?? 3))
@@ -431,8 +479,18 @@ struct RoleEditor: View {
         do {
             try store.saveRole(role)
             Task { await store.refreshLinkedContacts() }
-            dismiss()
+            didSaveRole(role)
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    func didSaveRole(_ next: CallRole) {
+        role = next
+        savedRole = next
+        nameDraft = next.name
+        manualNameEdited = false
+        errorMessage = nil
+        showsSavedFeedback = true
+        saveFeedbackTrigger += 1
     }
 
     private func deleteContact() {

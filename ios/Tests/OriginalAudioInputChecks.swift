@@ -80,6 +80,8 @@ private final class AudioInputProtocol: URLProtocol, @unchecked Sendable {
         for connection in [model, tts] { try credentials.write("synthetic-audio-key", connectionID: connection.id) }
         defer { for connection in [model, tts] { try? credentials.delete(connectionID: connection.id) } }
         let connections = [model, stt, tts] // No saved Apple preset is required.
+        for connection in connections { DataSharingConsent.setAllowed(true, for: connection) }
+        defer { for connection in connections { DataSharingConsent.setAllowed(false, for: connection) } }
         let role = CallRole(name: "Synthetic", modelConnectionID: model.id, sttConnectionID: stt.id, ttsConnectionID: tts.id)
         let voice = AudioInputVoice()
         let configuration = URLSessionConfiguration.ephemeral

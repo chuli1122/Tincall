@@ -40,7 +40,7 @@ Tincall 是最低支持 iOS 26 的原生 AI 语音通话 App。支持手机直�
 ## 开始使用
 
 1. **安装手机 App**：从 [最新发布页](https://github.com/chuli1122/Tincall/releases/latest) 下载 `*-selfsign-unsigned.ipa`，按 [自签指南](docs/SELF_SIGN.md) 使用自己的签名凭据重签安装，无需重新编译。需要 iOS 26 或以上的 iPhone，签名工具须正确配置 App／扩展标识及 App Group。也可使用 Mac 和 Xcode 从源码构建。
-2. **配置识别和声音**：在 App 配置 STT／TTS，选择供应商、型号和音色。TTS 的“语音表达提示词”有按型号区分的默认值，也可自行编辑。首次使用每条外部服务连接前，阅读其接收方与数据说明，并明确允许数据发送；更换地址或供应商后需重新确认。
+2. **配置识别和声音**：在 App 配置 STT／TTS，选择供应商、型号和音色。TTS 的“语音表达提示词”有按型号区分的默认值，也可自行编辑。ElevenLabs 连接可展开“高级参数”，调整稳定性和相似度。首次使用每条外部服务连接前，阅读其接收方与数据说明，并明确允许数据发送；更换地址或供应商后需重新确认。
 3. **配置联系人**：独立模式选模型并填写人物设定；MCP 按 [接入指引](docs/agent_prompt.md) 登记联系人并复制平台配置；后端按 [接口说明](docs/backend_api.md) 准备服务。
 4. **验证一通电话**：先确认服务和模型可达，再检查实际收音、回复、播放、打断和挂断。
 
@@ -85,10 +85,11 @@ powershell -NoProfile -ExecutionPolicy Bypass -File connector\install-local.ps1
 
 App 中打开“设置 → Tincall 云端 → 部署或更新服务”，用自己的项目和限定项目的管理令牌部署。成功后保存日常连接；新增 MCP 联系人无需重新部署。电脑 CLI 部署也可用，见 [部署指南](docs/cloud_setup.md)。
 
-应用更新不会自动更新已有云端。按原方式升级服务，保留原令牌和数据；不要用另一条首装流程覆盖旧配置。Supabase 图片所需迁移已纳入新版 App 的“部署或更新服务”和 CLI 部署，无需手动执行 SQL，见 [图片消息说明](docs/message_images.md)。录音与图片所需的私有存储桶和权限随基础迁移创建；录音保存及备份仍由用户分别启用。
+应用更新不会自动更新已有云端。设置中的“Tincall 云端”会检查服务版本；提示需要更新时，按原方式升级服务，保留原令牌和数据。Supabase 所需数据库迁移已纳入 App 的“部署或更新服务”和 CLI 部署，无需手动执行 SQL，见 [部署指南](docs/cloud_setup.md)。录音与图片所需的私有存储桶和权限随基础迁移创建；录音保存及备份仍需分别开启。
 
 ## 可选功能与数据
 
+- 联系人“通话偏好”中的“时间感知”可让 TA 了解消息之间的时间间隔，默认关闭，时间来自手机。
 - 通话文字和摘要可在本机保存；录音需用户分别启用。云同步、录音备份和后台来电分别配置，互不自动开启。
 - 「本机数据与备份」可分别清理录音、消息图片或全部通话记录，每项均需确认。清理只作用于本机，联系人、连接配置、云端副本和已导出文件保留；清理图片后与云端不同的内容需在同步时手动选择。
 - 已保存的服务、识别和语音合成连接可在「编辑连接」底部单独删除。一次确认后删除本机配置、访问凭据及关联选择，保留联系人、通话记录和云端数据；后台尝试解除该服务的设备绑定。远端不可达不阻断本机删除，仅提示可在服务端另行清理绑定，其他服务保持启用。通话或同步进行中需稍后操作。
@@ -107,7 +108,8 @@ App 中打开“设置 → Tincall 云端 → 部署或更新服务”，用自�
 | `ios/Tincall/Core/` | 模型协议、通话协调、外部接口、上下文／摘要、凭据、部署 |
 | `ios/Tincall/Voice/` | 收音、VAD、STT、TTS、切段、播放、音频路由 |
 | `ios/Tincall/Features/`、`Storage/` | 界面、配置／记录、备份和云同步 |
-| `ios/TincallCallWidget/`、`ios/LocalPackages/` | 实时活动扩展及随库第三方组件 |
+| `ios/TincallCallWidget/`、`ios/TincallCallIntents/` | 实时活动与系统通话意图扩展 |
+| `ios/LocalPackages/` | 随库第三方组件 |
 | `connector/` | Node 入口、SQLite、适配器、安装脚本和可选 Node 推送 |
 | `supabase/functions/`、`supabase/migrations/` | 共享连接逻辑、Edge 入口和数据库迁移 |
 | `cloudflare/` | 可选推送 Worker |
@@ -119,6 +121,7 @@ App 中打开“设置 → Tincall 云端 → 部署或更新服务”，用自�
 - [MCP 工具参数与行为](docs/mcp.md)
 - [后端 HTTP 协议](docs/backend_api.md)
 - [图片消息](docs/message_images.md)
+- [iOS 检查与 CI 覆盖范围](docs/ios_checks.md)
 - [开发与测试：环境、命令及验证范围](connector/README.md#checks-and-current-limits)
 - [第三方组件与素材](docs/third_party.md)
 

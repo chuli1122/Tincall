@@ -142,7 +142,8 @@ extension CallCoordinator {
         do {
             let state = try await external.answer(connection: connector, callID: callID,
                 requestID: requestID, epoch: value.externalEpoch ?? 0,
-                expressionPrompt: prepared.configuration.tts.effectiveExpressionPrompt, userName: summaryUserName())
+                expressionPrompt: prepared.configuration.tts.effectiveExpressionPrompt, userName: summaryUserName(),
+                timeAwarenessEnabled: role.timeAwarenessEnabled == true)
             guard session == identity, phase == .connecting else { throw CancellationError() }
             let expectedSource = role.effectiveCallMode == .standalone ? "independent" : role.effectiveCallMode.rawValue
             guard state.id == callID, state.contact_id == value.externalRoleID, state.source == expectedSource else {
@@ -197,6 +198,10 @@ extension CallCoordinator {
         }
     }
 
+    private enum Between {
+        static let word = "between"
+    }
+
     func declineIncoming(callID: UUID, role: CallRole?, connector: ConnectionProfile) async {
         cancelIncomingOpening(callID: callID)
         if session?.callID == callID { hangUp(); return }
@@ -223,14 +228,14 @@ extension CallCoordinator {
 
     /// Resume after app termination or redial: replay only events after the saved cursor, never old audio.
     func resumeExternal(record saved: CallRecord, role: CallRole, connections: [ConnectionProfile], retention: AudioRetention) async {
-        guard !isCallActive else { return }
+        guard !isCallActive, !Task.isCancelled else { return }
         do { try await CallAccessStore.shared.requireAccess() }
         catch {
             errorMessage = safeMessage(error)
             CallAccessStore.shared.showsUnlock = true
             return
         }
-        guard !isCallActive else { return }
+        guard !isCallActive, !Task.isCancelled else { return }
         guard canResumeExternal(saved, role: role) else {
             errorMessage = String(localized: "此记录无法按当前联系人配置恢复外部通话")
             return
@@ -302,8 +307,9 @@ extension CallCoordinator {
             guard page.call.status == "active" else { throw TincallError(message: String(localized: "请从来电页面接听此通话")) }
             // Keep the last persisted epoch until queued events have been consumed.
             voice.setSpeechInterruptionEnabled(speechInterruptionEnabled)
-            try await voice.start(session: identity, configuration: VoiceConfiguration(stt: stt, tts: tts,
-                voiceID: resolvedVoiceID(role: role, tts: tts), retention: retention))
+            let audio = VoiceConfiguration(stt: stt, tts: tts, voiceID: resolvedVoiceID(role: role, tts: tts), retention: retention)
+            if let onStartOutgoingAudio { try await onStartOutgoingAudio(identity, role, audio) }
+            else { try await voice.start(session: identity, configuration: audio) }
             guard session == identity else { return }
             phase = .active
             startActivityCheckpoints(identity)

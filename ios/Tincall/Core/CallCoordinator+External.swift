@@ -16,7 +16,8 @@ extension CallCoordinator {
                 guard let self else { return }
                 let data = try self.loadImages(input, callID: callID)
                 let images = try ConnectorMessageImage.inputs(assets: input.images ?? [], data: data)
-                let result = try await external.input(connection: source, callID: callID, pending: pending, text: input.text, images: images)
+                let result = try await external.input(connection: source, callID: callID, pending: pending, text: input.text, images: images,
+                    createdAt: input.createdAt)
                 guard self.turns[callID] == turn else { return }
                 guard result.call.id == callID, result.input_id == pending.messageID, result.epoch > pending.epoch else {
                     throw TincallError(message: String(localized: "连接端输入确认不匹配"))
@@ -28,6 +29,7 @@ extension CallCoordinator {
                 self.mutate(callID) { $0.externalEpoch = max($0.externalEpoch ?? 0, result.epoch); $0.externalPendingInput = nil; $0.externalReplyID = result.reply_id }
                 self.persist(callID)
                 self.tasks.removeValue(forKey: callID)
+                self.beginQueuedInput()
             } catch {
                 guard !Task.isCancelled, let self, self.turns[callID] == turn else { return }
                 self.tasks.removeValue(forKey: callID)
@@ -120,7 +122,7 @@ extension CallCoordinator {
             if event.type == "reply.completed", let replyID = event.payload.reply_id, var value = records[id] {
                 guard let text = event.payload.text else { throw TincallError(message: String(localized: "连接端完成事件缺少正文")) }
                 let message = CallMessage(id: value.messages.contains { $0.id == replyID } ? UUID() : replyID,
-                                          turnID: UUID(), role: .assistant, text: text, status: .completed)
+                                          turnID: UUID(), role: .assistant, text: cleanExternalText(text), status: .completed)
                 value.messages.append(message)
                 value.externalEpoch = max(value.externalEpoch ?? 0, event.epoch)
                 try save(value)
@@ -202,9 +204,19 @@ extension CallCoordinator {
             break
         case "reply.delta":
             guard let delta = event.payload.delta else { throw TincallError(message: String(localized: "连接端增量缺少文字")) }
-            receiveDelta(delta, turn: turn)
+            if role?.timeAwarenessEnabled == true {
+                if externalTimestampFilter?.turn != turn {
+                    var filter = CallTimestampStreamFilter()
+                    // A resumed reply can already contain accepted text. Restore its line position.
+                    _ = filter.append(records[id]?.messages.first(where: { $0.id == turn.messageID })?.text ?? "")
+                    externalTimestampFilter = (turn, filter)
+                }
+                let text = externalTimestampFilter?.filter.append(delta) ?? ""
+                if !text.isEmpty { receiveDelta(text, turn: turn) }
+            } else { receiveDelta(delta, turn: turn) }
         case "reply.completed":
-            guard let text = event.payload.text else { throw TincallError(message: String(localized: "连接端完成事件缺少正文")) }
+            guard let raw = event.payload.text else { throw TincallError(message: String(localized: "连接端完成事件缺少正文")) }
+            let text = cleanExternalText(raw)
             let received = records[id]?.messages.first(where: { $0.id == turn.messageID })?.text ?? ""
             guard text.hasPrefix(received) else {
                 complete(turn, status: .failed, error: TincallError(message: String(localized: "连接端完成正文与已接收内容不同，已停止合成")))
@@ -224,6 +236,10 @@ extension CallCoordinator {
         default:
             throw TincallError(message: String(localized: "连接端返回不支持的回复事件"))
         }
+    }
+
+    private func cleanExternalText(_ text: String) -> String {
+        role?.timeAwarenessEnabled == true ? CallTimestampStreamFilter.clean(text) : text
     }
 
     @discardableResult

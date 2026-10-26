@@ -172,16 +172,12 @@ struct CloudDeploymentGuide<NextSteps: View>: View {
                     .opacity(canDeploy || deploymentRequested ? 1 : 0.6)
                 }
                 .buttonStyle(.plain).disabled(!canDeploy)
-                Text("完成后自动保存连接。\n更新会保留原有数据和连接令牌。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                DisclosureGroup("接收方与数据用途") {
-                    Text("Supabase 会接收项目部署配置及必要的账户标识。部署的 Tincall 服务按所启用功能接收通话输入、联系人设定、图片与路由信息；记录和录音同步需另外开启。")
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("完成后自动保存连接。\n更新会保留原有数据和连接令牌。")
                         .font(.footnote).foregroundStyle(.secondary)
-                    if let ref = normalizedProjectRef { Text(verbatim: "https://\(ref).supabase.co").font(.caption) }
-                    if CallAccessStore.isStoreBuild {
-                        Text("部署会同时接入官方来电推送服务，向其提供项目标识和专用推送凭据，不发送聊天或录音。后台来电仍需由你在设置中开启。")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    DeploymentHelpButton(title: "接收方与数据用途", detail: "\(deploymentDataSharingDetail)")
                 }
                 DataSharingAgreementRow(isOn: $allowsDeploymentSharing)
                     .disabled(deploymentRequested || deploymentFinished)
@@ -196,15 +192,33 @@ struct CloudDeploymentGuide<NextSteps: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if deploymentFinished {
-                    Label("服务已部署或更新，连接已保存", systemImage: "checkmark.circle")
-                        .font(.subheadline).foregroundStyle(Color.accentColor)
-                    Button("查看接下来怎么用") { isConnected = true }
-                        .foregroundStyle(Color.accentColor)
+                    VStack(spacing: 12) {
+                        Label("服务已部署或更新，连接已保存", systemImage: "checkmark.circle")
+                            .font(.footnote).foregroundStyle(Color.accentColor)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("查看接下来怎么用") { isConnected = true }
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(minHeight: 44)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 20)
+                    .padding(.bottom, 20)
                 } else if deploymentAttempt > 0, !deploymentRequested {
                     guidanceNote("修正上方提示后点「重试部署或更新」，会接着上次继续，不会覆盖已有数据。")
                 }
             }
         }
+    }
+
+    private var deploymentDataSharingDetail: String {
+        var detail = String(localized: "Supabase 会接收项目部署配置及必要的账户标识。部署的 Tincall 服务按所启用功能接收通话输入、联系人设定、图片与路由信息；记录和录音同步需另外开启。")
+        if let ref = normalizedProjectRef { detail += "\n\nhttps://\(ref).supabase.co" }
+        if CallAccessStore.isStoreBuild {
+            detail += "\n\n" + String(localized: "部署会同时接入官方来电推送服务，向其提供项目标识和专用推送凭据，不发送聊天或录音。后台来电仍需由你在设置中开启。")
+        }
+        return detail
     }
 
     private func deploymentStep<Content: View>(_ number: String, title: LocalizedStringResource, caption: String,
@@ -363,22 +377,36 @@ struct CloudDeploymentGuide<NextSteps: View>: View {
 
 }
 
-private struct DeploymentHelpButton: View {
+struct DeploymentHelpButton: View {
     let title: LocalizedStringResource
-    let heading: LocalizedStringResource
+    var heading: LocalizedStringResource? = nil
     let detail: LocalizedStringResource
+    var systemImage: String? = nil
+    var isAccented = false
     @State private var isPresented = false
 
     var body: some View {
         Button { isPresented.toggle() } label: {
-            Text(title)
-                .font(.caption)
-                .underline(true, color: Color.secondary.opacity(0.3))
-                .foregroundStyle(isPresented ? Color.accentColor : .secondary)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 44)
+            Group {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.footnote)
+                        .frame(width: 32, height: 44, alignment: .leading)
+                } else {
+                    Text(title)
+                        .font(.caption)
+                        .underline(true, color: Color.secondary.opacity(0.3))
+                        .fixedSize(horizontal: true, vertical: false)
+                        .frame(minHeight: 44)
+                }
+            }
+            .foregroundStyle(systemImage == nil
+                ? (isPresented || isAccented ? Color.accentColor : .secondary)
+                : (isPresented ? .secondary : Color.accentColor))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(Text(title))
         .anchorPreference(key: DeploymentHelpPreference.self, value: .bounds) { anchor in
             isPresented ? DeploymentHelpPresentation(anchor: anchor, heading: heading, detail: detail,
                                                      dismiss: { isPresented = false }) : nil
@@ -388,7 +416,7 @@ private struct DeploymentHelpButton: View {
 
 private struct DeploymentHelpPresentation {
     let anchor: Anchor<CGRect>
-    let heading: LocalizedStringResource
+    let heading: LocalizedStringResource?
     let detail: LocalizedStringResource
     let dismiss: () -> Void
 }
@@ -401,7 +429,7 @@ private struct DeploymentHelpPreference: PreferenceKey {
     }
 }
 
-private struct DeploymentHelpOverlay: ViewModifier {
+struct DeploymentHelpOverlay: ViewModifier {
     func body(content: Content) -> some View {
         content.overlayPreferenceValue(DeploymentHelpPreference.self) { help in
             if let help {
@@ -431,24 +459,39 @@ private struct DeploymentHelpOverlay: ViewModifier {
 
     private func panelContent(_ help: DeploymentHelpPresentation) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                Text(help.heading).font(.subheadline.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                Button(action: help.dismiss) {
-                    Image(systemName: "xmark")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
+            if let heading = help.heading {
+                HStack(spacing: 12) {
+                    Text(heading).font(.subheadline.weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength: 0)
+                    closeButton(help.dismiss)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("收起说明")
+                detailText(help.detail)
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    detailText(help.detail)
+                    closeButton(help.dismiss)
+                }
             }
-            Text(help.detail)
-                .font(.footnote).lineSpacing(3)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
+    }
+
+    private func detailText(_ detail: LocalizedStringResource) -> some View {
+        Text(detail)
+            .font(.footnote).lineSpacing(3)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func closeButton(_ dismiss: @escaping () -> Void) -> some View {
+        Button(action: dismiss) {
+            Image(systemName: "xmark")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("收起说明")
     }
 }
 

@@ -12,6 +12,7 @@ struct CloudSyncScreen: View {
     var incomingController: IncomingCallController? = nil
     let onSaveConnection: (ConnectionProfile, String?, String?) throws -> Void
     let onDeleteConnection: (UUID) throws -> Void
+    @State private var versionRefreshAttempt = 0
 
     private var lockedConnectionIDs: Set<UUID> {
         guard let incomingController, incomingController.isEnabled || incomingController.needsDeviceRemoval else { return [] }
@@ -73,8 +74,12 @@ struct CloudSyncScreen: View {
                             Text(verbatim: profile.endpoint?.absoluteString ?? String(localized: "尚未填写地址"))
                                 .font(.caption).foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                            CloudServiceVersionStatus(connection: profile, refreshAttempt: versionRefreshAttempt)
                         }
                     }
+                }
+                Button("刷新服务版本", systemImage: "arrow.clockwise") {
+                    versionRefreshAttempt += 1
                 }
             }
         } header: { SettingsSectionHeading(title: String(localized: "已保存的服务"), caption: "SAVED SERVICES") } footer: {

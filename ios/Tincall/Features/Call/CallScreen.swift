@@ -397,7 +397,7 @@ struct CallScreen<Transcript: View>: View {
                         .lineLimit(1)
                         .opacity(captionText.isEmpty && !awaitingSpeechTranscript ? 0 : 1)
                         .accessibilityHidden(captionText.isEmpty && !awaitingSpeechTranscript)
-                    if awaitingSpeechTranscript {
+                    if awaitingSpeechTranscript && captionText.isEmpty {
                         CallTranscriptDots()
                             .font(Font(captionFonts.font(named: captionFontName, size: 18 * textScale)))
                             .foregroundStyle(palette.secondaryText)
@@ -517,6 +517,9 @@ struct CallScreen<Transcript: View>: View {
             if let onReconnect {
                 Button("恢复通话连接", systemImage: "arrow.clockwise", action: onReconnect).frame(minHeight: 44)
             }
+            if errorMessage == nil, isConfigured, !isCallActive, !isCallEnded, let onPreview {
+                Button("预览通话页面", action: onPreview).frame(minHeight: 44)
+            }
         }
         .font(CallNight.font(12))
         .multilineTextAlignment(.center)
@@ -579,9 +582,8 @@ struct CallScreen<Transcript: View>: View {
                 CallRoundButton(systemImage: "xmark", title: String(localized: "退出通话")) { close() }
             } else if isConfigured {
                 CallRoundButton(systemImage: "phone.fill", title: "开始通话", action: onStart).disabled(!canStart)
-                if let onPreview { Button("预览通话页面", action: onPreview).frame(minHeight: 44) }
             } else {
-                if let onPreview {
+                if errorMessage == nil, let onPreview {
                     controlButton(symbol: "phone", title: "预览通话页面", color: CallNight.lavender,
                                   size: 68, action: onPreview)
                 }
@@ -593,7 +595,8 @@ struct CallScreen<Transcript: View>: View {
         .frame(maxWidth: .infinity)
         .overlay(alignment: .top) {
             if presentation == .voice, !isAwaitingConfiguration,
-               !statusDetail.isEmpty || errorMessage?.isEmpty == false || onRetrySaving != nil || onReconnect != nil {
+               !statusDetail.isEmpty || errorMessage?.isEmpty == false || onRetrySaving != nil || onReconnect != nil
+                || (errorMessage == nil && isConfigured && !isCallActive && !isCallEnded && onPreview != nil) {
                 ScrollView {
                     notices.frame(maxWidth: .infinity)
                 }

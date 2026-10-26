@@ -11,7 +11,8 @@ private final class RoleProtocol: URLProtocol, @unchecked Sendable {
         var wrongToken = false
         var path = "mcp"
         var wrongRole = false
-        var requests: [[String: String]] = []
+        var waitResponse = "requested"
+        var requests: [[String: Any]] = []
     }
 
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "mcp-fixture.invalid" }
@@ -34,18 +35,20 @@ private final class RoleProtocol: URLProtocol, @unchecked Sendable {
                     body.append(contentsOf: buffer.prefix(count))
                 }
             }
-            let payload = try JSONDecoder().decode([String: String].self, from: body)
+            let payload = try JSONSerialization.jsonObject(with: body) as! [String: Any]
+            let roleID = payload["role_id"] as! String
             let state = Self.fixture.lock.withLock {
                 Self.fixture.requests.append(payload)
-                return (Self.fixture.status, Self.fixture.wrongToken, Self.fixture.path, Self.fixture.wrongRole)
+                return (Self.fixture.status, Self.fixture.wrongToken, Self.fixture.path, Self.fixture.wrongRole, Self.fixture.waitResponse)
             }
             let data: Data
             if state.0 != 200 {
                 data = Data(#"{"error":{"code":"forbidden"}}"#.utf8)
             } else {
-                let result: [String: Any] = ["role_id": state.3 ? UUID().uuidString : payload["role_id"]!, "contact_id": payload["contact_id"]!,
+                var result: [String: Any] = ["role_id": state.3 ? UUID().uuidString : payload["role_id"]!, "contact_id": payload["contact_id"]!,
                     "display_name": payload["display_name"]!, "mcp_path": state.2, "token_created": false,
-                    "token": state.1 ? "synthetic-phone-token" : "synthetic-role-token-\(payload["role_id"]!)"]
+                    "token": state.1 ? "synthetic-phone-token" : "synthetic-role-token-\(roleID)"]
+                if state.4 != "missing" { result["mcp_wait_timeout_seconds"] = state.4 == "wrong" ? 130 : payload["mcp_wait_timeout_seconds"]! }
                 data = try JSONSerialization.data(withJSONObject: result)
             }
             let response = HTTPURLResponse(url: request.url!, statusCode: state.0, httpVersion: "HTTP/1.1",
@@ -65,6 +68,8 @@ struct MCPRoleBindingChecks {
         var connection = ConnectionProfile(name: "Synthetic service", provider: .genericConnector,
             endpoint: URL(string: "https://mcp-fixture.invalid/tincall"))
         connection.externalRoleID = "shared-default-must-not-be-used"
+        DataSharingConsent.setAllowed(true, for: connection)
+        defer { UserDefaults.standard.removeObject(forKey: "tincall.dataSharing.v1.\(connection.id.uuidString)") }
         var role = CallRole(name: "Synthetic role", callMode: .mcp, externalConnectionID: connection.id)
         let otherRole = CallRole(name: "Another role", callMode: .mcp, externalConnectionID: connection.id)
         let otherConnectionID = UUID()
@@ -82,14 +87,24 @@ struct MCPRoleBindingChecks {
         role.externalRoleID = first.contact_id
         role.externalRoleName = first.display_name
         role.name = "Renamed role"
+        role.mcpWaitTimeoutSeconds = 100
         let repeated = try await client.upsertMCPRole(connection: connection, role: role)
         let another = try await client.upsertMCPRole(connection: connection, role: otherRole)
         precondition(first.token == repeated.token && first.contact_id == repeated.contact_id)
         precondition(another.contact_id != first.contact_id && another.token != first.token)
         let requests = RoleProtocol.fixture.lock.withLock { RoleProtocol.fixture.requests }
-        precondition(requests[0]["role_id"] == role.id.uuidString.lowercased())
-        precondition(requests[0]["contact_id"] == role.id.uuidString.lowercased())
-        precondition(requests[1]["display_name"] == "Renamed role")
+        precondition(requests[0]["role_id"] as? String == role.id.uuidString.lowercased())
+        precondition(requests[0]["contact_id"] as? String == role.id.uuidString.lowercased())
+        precondition(requests[1]["display_name"] as? String == "Renamed role")
+        precondition(requests[0]["mcp_wait_timeout_seconds"] as? Int == 120)
+        precondition(requests[1]["mcp_wait_timeout_seconds"] as? Int == 100)
+        precondition(first.mcp_wait_timeout_seconds == 120 && repeated.mcp_wait_timeout_seconds == 100)
+        for response in ["missing", "wrong"] {
+            RoleProtocol.fixture.lock.withLock { RoleProtocol.fixture.waitResponse = response }
+            do { _ = try await client.upsertMCPRole(connection: connection, role: role); preconditionFailure("Unconfirmed wait setting accepted") }
+            catch is TincallError { }
+        }
+        RoleProtocol.fixture.lock.withLock { RoleProtocol.fixture.waitResponse = "requested" }
         try credentials.writeMCPConfiguration(repeated, connectionID: connection.id, roleID: role.id)
         try credentials.writeMCPConfiguration(another, connectionID: connection.id, roleID: otherRole.id)
         try credentials.writeMCPConfiguration(another, connectionID: otherConnectionID, roleID: role.id)

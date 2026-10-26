@@ -22,8 +22,10 @@ for task_file in \
   supabase/migrations/202610210003_tincall_message_images.sql \
   supabase/migrations/202610220001_tincall_service_safety.sql \
   supabase/migrations/202610220002_tincall_mcp_safety.sql \
+  supabase/migrations/202610250001_tincall_mcp_wait_preferences.sql \
   supabase/functions/tincall/index.ts \
   supabase/functions/_shared/tincall/service.mjs \
+  supabase/functions/_shared/tincall/server-version.json \
   supabase/functions/_shared/tincall/protocol.mjs \
   supabase/functions/_shared/tincall/supabase-store.mjs \
   supabase/functions/_shared/tincall/message-images.mjs \

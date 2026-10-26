@@ -114,7 +114,8 @@ struct ConfigurationSettingsChecks {
         try store.selectSTTProvider(nil)
         precondition(store.defaultSTTConnectionID == nil && store.roles[0].sttConnectionID == nil)
         let first = ConnectionProfile(name: "Voice one", provider: .miniMax, model: "speech-02-hd", voiceID: "synthetic-one")
-        let second = ConnectionProfile(name: "Voice two", provider: .miniMax, model: "speech-02-hd", voiceID: "synthetic-two")
+        let second = ConnectionProfile(name: "Voice two", provider: .elevenLabs, model: "eleven_multilingual_v2",
+                                       voiceID: "synthetic-two", elevenLabsStability: 0.31, elevenLabsSimilarityBoost: 0.86)
         try store.saveConnection(first)
         try store.saveConnection(second)
         let fish = ConnectionProfile(name: "Fish voice", provider: .fishAudio, model: "s2.1-pro", voiceID: "synthetic-fish")
@@ -132,6 +133,11 @@ struct ConfigurationSettingsChecks {
         precondition(reopened.userProfile == profile)
         precondition(reopened.speechRecognitionCorrections == [correction])
         precondition(reopened.connections.filter { $0.provider.isSpeechSynthesis }.count == 3)
+        precondition(reopened.connections.first { $0.id == second.id } == second,
+                     "ElevenLabs voice settings must survive saving and reopening")
+        let legacyVoice = try JSONDecoder().decode(ConnectionProfile.self, from: JSONEncoder().encode(first))
+        precondition(legacyVoice.elevenLabsStability == nil && legacyVoice.elevenLabsSimilarityBoost == nil,
+                     "Connections without advanced settings retain supplier defaults")
         precondition(reopened.connections.first { $0.id == whisperID } == whisper)
         precondition(reopened.connections.first { $0.id == model.id } == model)
         // Restore the identity to an empty installation; retain an existing identity on merge.
@@ -143,6 +149,8 @@ struct ConfigurationSettingsChecks {
         precondition(target.speechRecognitionCorrections == [correction])
         precondition(target.connections.first { $0.id == whisperID } == whisper)
         precondition(target.connections.first { $0.id == fish.id } == fish)
+        precondition(target.connections.first { $0.id == second.id } == second,
+                     "Backup restore must preserve ElevenLabs voice settings")
         precondition(target.connections.first { $0.id == model.id } == model)
         precondition(target.roles.first { $0.id == role.id }?.sttConnectionID == whisperID)
         var unsafeImport = reopened.backupConfiguration()

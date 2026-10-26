@@ -97,13 +97,13 @@ test('switching the linked contact to standalone rejects MCP as a mode mismatch,
 });
 
 
-test('MCP default wait lasts two minutes and exposes no caller-managed reply identifiers',async context=>{
+test('MCP default wait lasts 120 seconds and exposes no caller-managed reply identifiers',async context=>{
   const directory=mkdtempSync(join(tmpdir(),'tincall-simple-mcp-')),owner=crypto.randomUUID();
   const store=createSQLiteStore({clients:[{token:'contact',owner_id:owner,contact_id:'visible'}]},join(directory,'calls.sqlite'));
   let advance=false,snapshots=0,clock=Date.now();
   const connector=createConnector({store:{...store,async mcpCommand(...args){
     const result=await store.mcpCommand(...args);
-    if(advance && args[2]==='snapshot' && args[3].after_sequence!==undefined){clock+=60000;snapshots++;}
+    if(advance && args[2]==='snapshot' && args[3].after_sequence!==undefined){clock+=45000;snapshots++;}
     return result;
   }},config:{bindings:[{owner_id:owner,contact_id:'visible',mode:'tools'}]},schedule:()=>{}});
   async function rpc(method,params){return (await (await connector.handle(new Request('https://fixture.invalid/mcp',{method:'POST',headers:{Authorization:'Bearer contact','Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params})}))).json()).result;}
@@ -116,8 +116,50 @@ test('MCP default wait lasts two minutes and exposes no caller-managed reply ide
     await tool('tincall_wait',{timeout_seconds:1});
     context.mock.method(Date,'now',()=>clock);advance=true;
     const timeout=await tool('tincall_wait');advance=false;
-    assert.equal(snapshots,2);assert.match(timeout.content[0].text,/tincall_wait/);assert.doesNotMatch(timeout.content[0].text,/get_call|cursor|epoch/);
+    assert.equal(snapshots,4);assert.match(timeout.content[0].text,/tincall_wait/);assert.doesNotMatch(timeout.content[0].text,/get_call|cursor|epoch/);
     assert.equal((await tool('tincall_reply',{call:callReference(id),text:'Complete text',wait_for_input:false})).isError,false);
     await tool('tincall_end',{call:callReference(id)});
+  } finally {context.mock.restoreAll();store.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('MCP contact wait preferences survive restart and apply to dial, wait and reply with explicit overrides',async context=>{
+  const directory=mkdtempSync(join(tmpdir(),'tincall-wait-preferences-')),owner=crypto.randomUUID();
+  const file=join(directory,'calls.sqlite'),config={clients:[{token:'phone',owner_id:owner},{token:'contact',owner_id:owner,contact_id:'visible'}]};
+  let store=createSQLiteStore(config,file),clock=Date.now(),advance=false,snapshots=0;
+  const connector=()=>createConnector({store:{...store,async mcpCommand(...args){
+    const result=await store.mcpCommand(...args);
+    if(advance && args[2]==='snapshot' && args[3].after_sequence!==undefined){clock+=1000;snapshots++;}
+    return result;
+  }},config:{bindings:[{owner_id:owner,contact_id:'visible',mode:'tools'}]},schedule:()=>{}});
+  let service=connector();
+  async function post(path,payload,token='phone'){
+    return service.handle(new Request('https://fixture.invalid'+path,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify(payload)}));
+  }
+  const tool=async(name,args={})=>(await (await post('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},'contact')).json()).result;
+  const role={role_id:crypto.randomUUID(),contact_id:'visible',display_name:'Synthetic'};
+  async function timed(name,args,seconds){
+    snapshots=0;advance=true;
+    const result=await tool(name,args);advance=false;
+    assert.equal(result.isError,false,JSON.stringify(result));
+    assert.match(result.content[0].text,/tincall_wait/);
+    assert.equal(snapshots,seconds);
+  }
+  try {
+    assert.equal((await (await post('/mcp/roles/upsert',{...role,mcp_wait_timeout_seconds:100})).json()).mcp_wait_timeout_seconds,100);
+    store.close();store=createSQLiteStore(config,file);service=connector();
+    assert.equal((await (await post('/mcp/roles/upsert',role)).json()).mcp_wait_timeout_seconds,100);
+    context.mock.method(Date,'now',()=>clock);
+    context.mock.method(globalThis,'setTimeout',callback=>{queueMicrotask(callback);return 0;});
+    await timed('tincall_call',{},100);
+    let call=(await store.command(owner,'call.current')).call;
+    await store.command(owner,'call.accept',{request_id:crypto.randomUUID(),call_id:call.id,epoch:call.epoch});
+    await tool('tincall_wait'); // Deliver the connection event before waiting for speech.
+    await timed('tincall_wait',{},100);
+    await timed('tincall_reply',{call:callReference(call.id),text:'Synthetic reply'},100);
+    assert.equal((await (await post('/mcp/roles/upsert',{...role,mcp_wait_timeout_seconds:130})).json()).mcp_wait_timeout_seconds,130);
+    await timed('tincall_wait',{},130);
+    await timed('tincall_wait',{timeout_seconds:2},2);
+    for(const timeout_seconds of [0,131,1.5])assert.equal((await tool('tincall_reply',{call:callReference(call.id),text:'Must not send',timeout_seconds})).isError,true);
+    assert.equal((await store.command(owner,'call.record',{call_id:call.id})).messages.some(message=>message.text==='Must not send'),false);
   } finally {context.mock.restoreAll();store.close();rmSync(directory,{recursive:true,force:true});}
 });

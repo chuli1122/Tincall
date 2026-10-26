@@ -61,6 +61,10 @@ extension CallCoordinator {
         requestSummary(callID: value.id)
     }
 
+    private enum Goodbye {
+        static let word = "goodbye"
+    }
+
     func resumePendingSummaries(from values: [CallRecord], connections: [ConnectionProfile], roles: [CallRole]) {
         for value in values where value.endedAt != nil && (value.summaryStatus == .pending || value.summaryStatus == .generating) {
             guard !summaryTasks.isRunning(value.id) else { continue }

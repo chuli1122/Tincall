@@ -10,8 +10,13 @@ struct ContactsScreen: View {
     let onSelectRole: (UUID) -> Void
     var records: CallRecordStore? = nil
     var onRequestSummary: ((UUID) -> Void)? = nil
+    var dismissEditorRequest: UUID? = nil
 
     @State private var editingRole: CallRole?
+    @State private var editorInitialDraft: CallRole?
+    @State private var latestEditorDraft: CallRole?
+    @State private var interruptedDrafts: [UUID: CallRole] = [:]
+    @State private var interruptedNewRole: CallRole?
     @State private var searchText = ""
     @ScaledMetric(relativeTo: .largeTitle) private var titleFontSize = 48.0
     @ScaledMetric(relativeTo: .body) private var avatarSize = 40.0
@@ -23,6 +28,13 @@ struct ContactsScreen: View {
 
     var body: some View {
         List {
+            if let issue = store.contactSyncIssue {
+                Text(issue)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+            }
             if visibleRoles.isEmpty {
                 Text(store.roles.isEmpty ? String(localized: "轻点右上角的 + 添加联系人") : String(localized: "没有找到这个名字"))
                     .font(.callout)
@@ -56,9 +68,19 @@ struct ContactsScreen: View {
         .background(Color(.systemBackground))
         .sheet(item: $editingRole) { role in
             NavigationStack {
-                RoleEditor(role: role, store: store, records: records, isCallActive: isCallActive, onRequestSummary: onRequestSummary)
+                RoleEditor(role: role, store: store, records: records, isCallActive: isCallActive,
+                           onRequestSummary: onRequestSummary, initialDraft: editorInitialDraft,
+                           onDraftChange: { latestEditorDraft = $0 })
             }
             .environment(\.navigationDockClearance, 0)
+        }
+        .onChange(of: dismissEditorRequest) {
+            guard let role = editingRole else { return }
+            interruptedDrafts[role.id] = latestEditorDraft ?? role
+            if !store.roles.contains(where: { $0.id == role.id }) { interruptedNewRole = role }
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { editingRole = nil }
         }
     }
 
@@ -149,7 +171,7 @@ struct ContactsScreen: View {
                 .frame(minWidth: 16, alignment: .leading)
                 .accessibilityHidden(true)
             Button {
-                editingRole = role
+                editContact(role)
             } label: {
                 HStack(spacing: 16) {
                     avatar(for: role)
@@ -200,6 +222,14 @@ struct ContactsScreen: View {
     }
 
     private func addContact() {
-        editingRole = CallRole(name: "")
+        let role = interruptedNewRole ?? CallRole(name: "")
+        interruptedNewRole = nil
+        editContact(role)
+    }
+
+    private func editContact(_ role: CallRole) {
+        editorInitialDraft = interruptedDrafts.removeValue(forKey: role.id)
+        latestEditorDraft = editorInitialDraft ?? role
+        editingRole = role
     }
 }

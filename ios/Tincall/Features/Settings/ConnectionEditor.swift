@@ -63,6 +63,7 @@ struct ConnectionEditor: View {
     @State private var speechTestText = ""
     @State private var isCustomTTSModel = false
     @State private var isConfirmingDeletion = false
+    @State private var showsAdvancedConfiguration = false
 
     init(connection: ConnectionProfile, isExisting: Bool = true, isCallActive: Bool = false,
          isConnectionLocked: Bool = false,
@@ -192,14 +193,15 @@ struct ConnectionEditor: View {
                 if connection.provider != .appleSpeech {
                     SettingsCredentialField(title: connection.provider == .genericConnector ? String(localized: "手机访问令牌") : connection.provider == .whisperCompatible ? String(localized: "API Key（按服务要求填写）") : "API Key",
                                             connectionID: connection.id, text: $apiKey,
-                                            isReadOnly: connection.provider == .genericConnector && isExisting)
+                                            isReadOnly: connection.provider == .genericConnector && isExisting,
+                                            help: "凭据只留在系统钥匙串，不写入配置文件或通话记录。")
                     if connection.provider == .genericConnector && isExisting {
                         Text("访问令牌已保存，由 App 用于连接服务。这里仅供查看和复制；另一台手机连接同一服务时才需要填写。")
                             .font(.footnote).foregroundStyle(.secondary)
                         NavigationLink {
                             MCPOAuthAuthorizationSettings(connection: connection)
                         } label: {
-                            SettingsActionLabel(title: String(localized: "ChatGPT 授权"), symbol: "key")
+                            SettingsActionLabel(title: String(localized: "MCP OAuth 授权"), symbol: "key")
                         }
                         NavigationLink {
                             ConnectorCurrentCallSettings(connection: connection, isCallActive: isCallActive)
@@ -211,10 +213,9 @@ struct ConnectionEditor: View {
                         SettingsCredentialField(title: "API Secret", connectionID: connection.id,
                                                 field: .apiSecret, text: $apiSecret)
                     }
-                    Text("凭据只留在系统钥匙串，不写入配置文件或通话记录。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+                    if connection.provider == .elevenLabs {
+                        elevenLabsAdvancedConfiguration
+                    }
                 }
                 if connection.provider.isSpeechSynthesis {
                     SettingsField(title: String(localized: "试听内容")) {
@@ -227,7 +228,7 @@ struct ConnectionEditor: View {
             } header: { SettingsSectionHeading(number: connection.provider.isSpeechSynthesis ? "01" : nil, title: String(localized: "连接配置"), caption: "CONNECTION") }
             if connection.provider.isSpeechSynthesis {
                 Section {
-                    SettingsField(title: String(localized: "语音表达提示词")) {
+                    SettingsField(title: String(localized: "语音表达提示词"), help: "提示词跟着合成模型自动切换。改过以后按你写的来，点恢复默认换回当前模型那套；清空即关闭。\n独立模式每轮自动带上；后端／MCP 请复制到外部平台的提示词里。") {
                         TextEditor(text: Binding(get: { connection.effectiveExpressionPrompt }, set: { connection.expressionPrompt = $0 }))
                             .scrollContentBackground(.hidden).frame(minHeight: 120)
                             .accessibilityLabel("语音表达提示词")
@@ -271,10 +272,7 @@ struct ConnectionEditor: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                     .listRowSeparator(.hidden)
                     .onChange(of: connection.effectiveExpressionPrompt) { _, _ in didCopyExpression = false }
-                } header: { SettingsSectionHeading(number: "02", title: String(localized: "语音表达"), caption: "EXPRESSION") } footer: {
-                    Text("提示词跟着合成模型自动切换。改过以后按你写的来，点恢复默认换回当前模型那套；清空即关闭。\n独立模式每轮自动带上；后端／MCP 请复制到外部平台的提示词里。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                }
+                } header: { SettingsSectionHeading(number: "02", title: String(localized: "语音表达"), caption: "EXPRESSION") }
             }
             ConnectionDataSharingSection(connection: sharingConnection)
             if let errorMessage { Section { Label(errorMessage, systemImage: "exclamationmark.triangle").foregroundStyle(.red) } }
@@ -297,6 +295,7 @@ struct ConnectionEditor: View {
                                    onAction: { _ = save() },
                                    hasUnsavedChanges: hasUnsavedChanges,
                                    onSaveBeforeDismiss: { completion in if save() { completion() } }))
+        .modifier(DeploymentHelpOverlay())
         .alert("删除这套连接配置？", isPresented: $isConfirmingDeletion) {
             Button("取消", role: .cancel) { }
             Button("删除", role: .destructive) {
@@ -334,6 +333,57 @@ struct ConnectionEditor: View {
             try onDelete(connection.id)
             dismiss()
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private var elevenLabsAdvancedConfiguration: some View {
+        Group {
+            Button {
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    showsAdvancedConfiguration.toggle()
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("高级参数")
+                    Image(systemName: showsAdvancedConfiguration ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .font(.footnote)
+                .foregroundStyle(Color.accentColor)
+                .frame(minHeight: 32, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(showsAdvancedConfiguration ? String(localized: "已展开") : String(localized: "已收起"))
+            if showsAdvancedConfiguration {
+                VStack(alignment: .leading, spacing: 16) {
+                    elevenLabsSlider(title: String(localized: "稳定性"), value: $connection.elevenLabsStability, defaultValue: 0.5)
+                    elevenLabsSlider(title: String(localized: "相似度"), value: $connection.elevenLabsSimilarityBoost, defaultValue: 0.75)
+                }
+            }
+        }
+        .disabled(isConnectionLocked || isCallActive)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 8, trailing: 16))
+    }
+
+    private func elevenLabsSlider(title: String, value: Binding<Double?>, defaultValue: Double) -> some View {
+        let selection = Binding<Double>(get: {
+            let current = value.wrappedValue ?? defaultValue
+            return current.isFinite ? min(1, max(0, current)) : defaultValue
+        }, set: { value.wrappedValue = $0 })
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(title)
+                Spacer(minLength: 0)
+                Text(selection.wrappedValue, format: .number.precision(.fractionLength(2)))
+                    .monospacedDigit()
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            Slider(value: selection, in: 0...1, step: 0.01) { Text(title) }
+                .tint(.accentColor)
+        }
     }
 
     private var speechTestAction: some View {

@@ -55,6 +55,7 @@ final class RoleMCPSetup {
     func canReuse(role: CallRole, connection: ConnectionProfile?) -> Bool {
         guard let connection, connection.provider == .genericConnector, let configuration else { return false }
         return configuration.mcp_url == connection.mcpURL
+            && configuration.mcp_wait_timeout_seconds == role.effectiveMCPWaitTimeoutSeconds
             && configuration.contact_id == role.mcpContactID
             && configuration.display_name == role.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -64,16 +65,33 @@ final class RoleMCPSetup {
         return wakeConfiguration
     }
 
-    func loadWakeConfiguration(connection: ConnectionProfile, contactID: String) async {
+    func loadWakeConfiguration(connection: ConnectionProfile, contactID: String, role: CallRole? = nil) async {
         let loadID = UUID()
         wakeLoadID = loadID
         isLoadingWakeConfiguration = true
         wakeIssue = nil
         defer { if wakeLoadID == loadID { isLoadingWakeConfiguration = false } }
-        do {
-            let value = try await client.wakeBridgeConfiguration(connection: connection, contactID: contactID)
+        func checkLoad() throws {
             try Task.checkCancellation()
-            guard wakeLoadID == loadID else { return }
+            guard wakeLoadID == loadID else { throw CancellationError() }
+        }
+        do {
+            let value: WakeBridgeConfiguration
+            do {
+                value = try await client.wakeBridgeConfiguration(connection: connection, contactID: contactID)
+            } catch let failure as ExternalCallFailure where failure.code == "contact_not_found" {
+                try checkLoad()
+                guard let role, role.effectiveCallMode == .mcp,
+                      role.externalConnectionID == connection.id, role.mcpContactID == contactID else { throw failure }
+                let registered = try await client.upsertMCPRole(connection: connection, role: role)
+                try checkLoad()
+                try await client.setMCPContactMode(connection: connection, roleID: role.id, mode: .mcp)
+                try checkLoad()
+                try credentials.writeMCPConfiguration(registered, connectionID: connection.id, roleID: role.id)
+                configuration = registered
+                value = try await client.wakeBridgeConfiguration(connection: connection, contactID: contactID)
+            }
+            try checkLoad()
             guard value.version == 2 else {
                 throw TincallError(message: String(localized: "请先更新此服务，再复制带有专用 MCP 的唤醒桥配置。"))
             }
@@ -82,7 +100,11 @@ final class RoleMCPSetup {
             wakeContactID = contactID
         } catch {
             guard !Task.isCancelled, wakeLoadID == loadID else { return }
-            wakeIssue = error.localizedDescription
+            if let failure = error as? ExternalCallFailure, failure.code == "contact_not_found" {
+                wakeIssue = String(localized: "云端未找到这位联系人的 MCP 身份。请确认所选云端连接，并重新获取 MCP 配置。")
+            } else {
+                wakeIssue = error.localizedDescription
+            }
         }
     }
 

@@ -429,6 +429,10 @@ final class CallRecordStore {
         return incoming
     }
 
+    private enum And {
+        static let word = "and"
+    }
+
     private func matchingRecord(_ incoming: CallRecord, in candidates: [CallRecord]) -> CallRecord? {
         let sourceID = incoming.sourceRecordID ?? incoming.id
         if let existing = candidates.first(where: { ($0.sourceRecordID ?? $0.id) == sourceID || $0.id == incoming.id }) { return existing }

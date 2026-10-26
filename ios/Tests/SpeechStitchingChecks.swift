@@ -4,7 +4,7 @@
 import Foundation
 
 /// Real HTTP/queue behavior with held synthetic PCM responses. The production
-/// interruption switch pauses rendering throughout; no audio device is opened.
+/// pre-synthesis playback switch pauses rendering; no audio device is opened.
 private final class StitchProtocol: URLProtocol, @unchecked Sendable {
     static let server = StitchServer()
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -67,14 +67,25 @@ struct SpeechStitchingChecks {
         playback.retainsAudio = true
         var archived = 0
         playback.onAudioReady = { _, _ in archived += 1 }
-        func begin(_ key: String = "synthetic-stitch", model: String = "eleven_v4") throws {
+        func begin(_ key: String = "synthetic-stitch", model: String = "eleven_v4",
+                   stability: Double? = nil, similarity: Double? = nil) throws {
             try playback.begin(settings: .elevenLabs(ElevenLabsConfiguration(
-                elevenLabsAPIKey: key, elevenLabsVoiceID: "synthetic-voice", elevenLabsModel: model)))
+                elevenLabsAPIKey: key, elevenLabsVoiceID: "synthetic-voice", elevenLabsModel: model,
+                stability: stability, similarityBoost: similarity)),
+                playbackEnabled: false)
         }
+        do {
+            try begin()
+            preconditionFailure("system audio interruption must reject a new reply")
+        } catch let error as TincallError {
+            precondition(error.message == String(localized: "语音播放被系统音频中断，请重新打开麦克风后继续"))
+        }
+        precondition(!playback.isActive && !playback.isPlaying && server.count == 0,
+                     "an interrupted reply must not start synthesis or playback")
+        playback.setAudioInterrupted(false)
         try begin()
         let texts = ["[chuckles] 好的。"] + (1...4).map { String(repeating: "字", count: 22) + "\($0)。" }
-        for text in texts { try playback.appendText(text, final: false) }
-        try playback.appendText("", final: true)
+        for text in texts.prefix(2) { try playback.appendText(text, final: false) }
         try await eventually { server.count >= 1 }
         try await Task.sleep(for: .milliseconds(120))
         precondition(server.count == 1, "response headers and partial PCM must not release the next request")
@@ -83,10 +94,18 @@ struct SpeechStitchingChecks {
             let body = server.body(index)
             precondition(body["text"] as? String == texts[index], "keep original text and tags exactly")
             precondition(body["previous_text"] == nil)
+            precondition(body["voice_settings"] == nil, "untouched presets must retain supplier voice settings")
             let expected = (max(0, index - 3)..<index).map { "synthetic-\($0)" }
-            precondition((body["previous_request_ids"] as? [String] ?? []) == expected,
-                         "only the last three fully received successful requests may be referenced")
+            let actual = body["previous_request_ids"] as? [String] ?? []
+            precondition(actual == expected,
+                         "only the last three fully received successful requests may be referenced at \(index): \(actual)")
             server.complete(index)
+            try await eventually { archived == index + 1 }
+            // Keep this successful chain independent of the 500ms fallback
+            // exercised below; simulator scheduling must not select that path.
+            if index > 0, index + 1 < texts.count {
+                try playback.appendText(texts[index + 1], final: index + 1 == texts.count - 1)
+            }
         }
         try await eventually { archived == 5 }
         precondition(!playback.isPlaying && playback.synthesisError == nil,
@@ -177,6 +196,29 @@ struct SpeechStitchingChecks {
         playback.stop()
         try await Task.sleep(for: .milliseconds(550))
         precondition(server.count == cancelledAt + 1, "cancelling a turn also cancels the stitching wait")
+        for (stability, similarity) in [(0.31, 0.86), (0.0, 1.0), (0.5, nil), (nil, 0.75)] as [(Double?, Double?)] {
+            let index = server.count
+            try begin(stability: stability, similarity: similarity)
+            try playback.appendText("调整后的声音。", final: true)
+            try await eventually { server.count == index + 1 }
+            let settings = server.body(index)["voice_settings"] as! [String: Double]
+            precondition(settings["stability"] == stability && settings["similarity_boost"] == similarity,
+                         "send only explicitly configured values, including range boundaries")
+            let before = archived
+            server.complete(index)
+            try await eventually { archived == before + 1 }
+            playback.stop()
+        }
+        for invalid in [-0.01, 1.01, .infinity, .nan] {
+            for similarityOnly in [false, true] {
+                let before = server.count
+                try begin(stability: similarityOnly ? nil : invalid, similarity: similarityOnly ? invalid : nil)
+                try playback.appendText("无效参数不能发出。", final: true)
+                try await eventually { playback.synthesisError != nil }
+                precondition(server.count == before, "reject invalid imported settings before any HTTP request")
+                playback.stop()
+            }
+        }
         print("PASS: full-response context, last-three IDs, preserved text/tags, receive without playback, failed-segment recovery, cancellation, unsupported models, 500ms fallback, two-request cap and out-of-order completion")
     }
 

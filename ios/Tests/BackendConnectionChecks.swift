@@ -77,6 +77,8 @@ private final class BackendControlProtocol: URLProtocol, @unchecked Sendable {
 @main struct BackendConnectionChecks {
     @MainActor static func main() async throws {
         let connection = ConnectionProfile(name: "Synthetic", provider: .genericConnector, endpoint: URL(string: "https://backend-check.invalid"))
+        DataSharingConsent.setAllowed(true, for: connection)
+        defer { DataSharingConsent.setAllowed(false, for: connection) }
         let credentials = CredentialStore()
         try credentials.write("synthetic-only", connectionID: connection.id)
         defer { try? credentials.delete(connectionID: connection.id) }

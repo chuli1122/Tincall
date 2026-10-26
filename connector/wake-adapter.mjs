@@ -6,6 +6,7 @@ import {readFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
+import {mcpMessageXML} from '../supabase/functions/_shared/tincall/message-images.mjs';
 
 class StopError extends Error {}
 
@@ -60,7 +61,7 @@ export async function* sseFrames(body) {
 export async function readWakeInput(config, signal, fetcher = fetch) {
   // Restart pagination if an interruption replaced the input while reading.
   for (let attempt = 0; attempt < 3; attempt++) {
-    const messages = new Map(), media = [];
+    const messages = new Map(), images = new Map();
     let cursor, target, callID, latest, voiceInstructions, changed = false;
     do {
       const url = new URL(config.input.url);
@@ -81,13 +82,16 @@ export async function readWakeInput(config, signal, fetcher = fetch) {
       }
       target = value.reply?.reply_to ?? target;
       callID = value.call?.id;
+      const media = (page.content ?? []).filter(block => block.type === 'image');
+      let imageIndex = 0;
       for (const message of value.messages) {
         if (!message.id) throw new Error('Input message has no ID');
         messages.set(message.id, message);
+        const count = message.images?.length ?? 0;
+        images.set(message.id, media.slice(imageIndex, imageIndex + count));
+        imageIndex += count;
       }
-      for (const block of page.content ?? []) {
-        if (block.type !== 'text' && !media.some(item => JSON.stringify(item) === JSON.stringify(block))) media.push(block);
-      }
+      if (imageIndex !== media.length) throw new Error('Input images do not match messages');
       voiceInstructions = value.voice_instructions ?? voiceInstructions;
       latest = value;
       if (value.has_more && (!value.cursor || (cursor && value.cursor.sequence <= cursor.sequence))) {
@@ -96,7 +100,10 @@ export async function readWakeInput(config, signal, fetcher = fetch) {
       cursor = value.cursor;
     } while (latest.has_more);
     if (changed) continue;
-    return {...latest, messages: [...messages.values()], content: media, voice_instructions: voiceInstructions};
+    const content = [...messages.values()].filter(message => message.text || message.images?.length).flatMap(message => [
+      {type:'text', text:mcpMessageXML(message, latest.call)}, ...(images.get(message.id) ?? []),
+    ]);
+    return {...latest, messages: [...messages.values()], content, voice_instructions: voiceInstructions};
   }
   throw new Error('Input changed during pagination');
 }
@@ -128,9 +135,6 @@ export function runAICommand(command, config, input, signal) {
     });
     if (signal.aborted) cancel();
     child.stdin.end(JSON.stringify({
-      messages: input.messages.filter(message=>message.text || message.images?.length).map(message=>({
-        name:message.role==='user'?(input.call.user_name || '用户'):'你',text:message.text,
-      })),
       ...(input.event==='answered'?{message:'通话已接通，可以通过 tincall_reply 工具打招呼了。'}:{}),
       ...(input.content.length?{content:input.content}:{}),
       ...(input.voice_instructions?{voice_instructions:input.voice_instructions}:{}),

@@ -1,6 +1,46 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "高级参数": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced Parameters"
+          }
+        }
+      }
+    },
+    "稳定性": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stability"
+          }
+        }
+      }
+    },
+    "相似度": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Similarity"
+          }
+        }
+      }
+    },
+    "ElevenLabs 稳定性和相似度须在 0–1 之间。": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ElevenLabs stability and similarity must be between 0 and 1."
+          }
+        }
+      }
+    },
   "开通官方来电推送": {
     "localizations": {
       "en": {
@@ -4333,8 +4373,15 @@
         }
       }
     },
-    "你是 Tincall 的接入助手。先确认用户要用独立模式、普通 MCP、MCP＋唤醒桥还是后端直连，再只提供对应步骤。不要把普通模型 API 地址当成 Tincall 服务地址，也不要让用户把令牌贴进聊天。MCP 用于支持 MCP 工具的 AI 平台；后端接法用于自行实现 Tincall 通话接口的服务。\n\n资料仓库：https://github.com/chuli1122/Tincall\n接入细节和部署说明以仓库中的 README、connector 和文档为准。\n\n普通 MCP 接法\n\n一、在 AI 平台配置服务\n先在 Tincall「设置 → Tincall 云端」部署或连接支持 MCP 的服务，再编辑联系人，通话方式选 MCP、选择连接并保存。联系人页直接提供传输方式、URL 和 Authorization 的复制，推荐 HTTP（Streamable HTTP），平台仅支持旧 SSE 时再选 SSE。将 URL 填入平台 MCP 服务地址，将复制的 Authorization 填入同名请求头；地址已完整，不要重复追加 /mcp。Authorization 包含 Bearer 和联系人专用令牌，不要替换为手机令牌或 service-role 密钥。令牌只放私密服务配置，不贴进聊天。旧云端须升级数据库迁移和服务函数，再刷新平台工具列表。\n\n二、可用工具\n参数及必填项以 tools/list 为准：\n• tincall_call(contact_id?)：向手机发起来电，等待接听后返回，随后可通过 tincall_reply 打招呼。联系人专用凭据无需参数；其他身份按工具定义填写 contact_id。\n• tincall_get_call(call_id?, limit?, before_sequence?)：查看保存的通话文字、图片和当前状态；结束的通话可能另有摘要。按结果指引翻阅更早记录。日常对话使用 tincall_wait。\n• tincall_wait()：等待新消息、接听或挂断，单次最多两分钟。超时继续调用，不会挂断；播放停止不会让等待提前结束。\n• tincall_reply(text, wait_for_input?)：用 text 一次提交完整回复，默认继续等下一句话。告别时设置 wait_for_input:false，再调用 tincall_end。\n• tincall_end()：通知手机等已收到的回复播放完成后挂断。手机手动挂断仍立即结束。\n• tincall_list_calls(limit?, before?)：列出保存的通话，按结果指引继续翻页，再用 get_call 查看选中的记录。\n\n三、接听、回复与续等\n用户要求主动打来时直接调用 tincall_call()，等接通结果返回后用 tincall_reply 提交问候。普通通话的工具结果直接包含用户名与发言，回复只需正文；图片通过 MCP image content 返回，应读取实际图片内容。\n\n朗读要求在通话开始时提供一次，平台需保留同一对话的上下文并遵循要求。AI 写完全文再调用 tincall_reply。手机打断播放后，后续提交的完整回复仍可正常接收；等待应继续到用户说完并提交新消息。\n\n没有新消息时，单次等待最多两分钟，正常超时后继续调用 tincall_wait。整通电话不受两分钟限制。客户端若先报 Request timed out: tools/call，只说明没有取得结果，不能据此判断回复没有发送；不要直接重发正文，可调用 tincall_wait 继续。通话结束后停止等待。\n\nMCP＋唤醒桥接法\n\n在联系人编辑页的 MCP 模式中选择唤醒桥并保存，复制这位联系人的唤醒桥配置。接入程序负责持续订阅事件、读取完整输入，再启动外部 AI 任务；可使用仓库中的 connector/wake-adapter.mjs，具体配置按 connector/README.md 操作。平台启动命令需续接同一对话，带入用户名、正文、实际图片和首次朗读要求，并配置专用 MCP。AI 使用 tincall_reply 提交完整 text 后结束任务，新消息再触发下一次任务，无需调用 wait。仅导入普通 MCP 地址不会自动启动闲置的 AI。\n\n四、平台边界\nKelivo 的 MCP 请求超时默认 30 秒，需在其 MCP 设置里调至 180 秒并重新连接 Tincall。Tincall 单次最长等待 120 秒，回复调用还包括手机朗读和等用户说话的时间；客户端的等待时间应比服务端更长。云端更新工具定义后，需要刷新平台工具列表或重新连接。\n\nMCP 不能自行唤醒任意闲置平台，也不能强制取消宿主模型的生成；手机拨号需外部平台保持运行或已有可用唤醒桥。工具请求时限和连续调用次数还受平台限制。历史摘要由手机在通话结束后实际生成并提交，没有摘要时不推测其原因。\n\n后端接法\n\n一、连接与基础格式\n自有后端负责人物设定、上下文和真实生成，手机负责收音、识别、朗读和本地记录。后端实现下面的 HTTPS / JSON 通话接口，无需实现 MCP，也不必开启云端备份。手机在「Tincall 云端 → 连接已有服务」保存 HTTPS 基础地址和手机访问令牌、检查连接，再到联系人编辑页选择后端、该连接及对话对象。\n\n以下路径相对于基础地址。手机发送 Authorization: Bearer <手机访问令牌>，JSON 请求带 Content-Type: application/json 和 Accept: application/json；成功响应为 HTTP 200 的 JSON，不依赖重定向。错误返回非成功 HTTP 状态及 {error:{code:\"错误代码\"}}。写请求按 request_id 去重，相同请求重试返回原结果；同一 ID 不能更改内容。隔离不同访问身份的数据，不让客户端自行声明所有者。\n\ncall 对象必须包含 id(UUID)、contact_id(字符串)、source(\"backend\")、status(\"active\"/\"ringing\"/\"ended\")、epoch(非负整数)、last_sequence(非负整数)。一个 call_id 对应一通电话，message_id 对应一条输入，reply_id 对应一轮回复，不可混用。\n\n二、发现、开始和接听\nGET /capabilities 返回 {bindings:[{contact_id:\"联系人标识\",display_name:\"显示名\",generation_configured:true}]}；display_name 可省略，只有标识非空且 generation_configured:true 的对象才可在手机选择。\n\nPOST /calls 接收 request_id、call_id、contact_id、source:\"backend\"、expression_prompt，返回 {call}；新通话为 active、epoch:0，并产生 call.started 事件。GET /calls/current 返回 {call:对象或null}。如支持后端主动来电，已有 ringing 通话由 POST /calls/{call_id}/answer 接收 request_id、epoch、expression_prompt，返回 active 的 {call}，产生 call.started。expression_prompt 为语音表达要求，可为空；后端负责将其用于生成。\n\n三、输入与回复事件\nPOST /calls/{call_id}/input 接收 request_id、message_id、当前 epoch、text，以及可选 images。每张图片为 {id:\"UUID\",mime_type:\"image/jpeg或image/png\",data_base64:\"标准Base64\"}，最多四张、每张最多 5 MiB，Base64 不带 data URI 前缀。有图时 text 可为空，无图时文字须非空。返回 {call,input_id,reply_id,epoch}：input_id 等于 message_id，epoch 已递增一次。保存输入，取消旧生成，并产生 input.accepted、reply.started 后启动本轮生成。\n\nGET /calls/{call_id}/events?after=N&limit=100&wait=20 返回 {call,events,cursor,has_more}。事件结构为 {sequence,call_id,epoch,type,payload}，sequence 从 1 连续递增。after 默认 0，后续使用上次 cursor；已有事件立即返回，没有则等待新事件或到期返回 events:[]、cursor:N、has_more:false。空页不是挂断；has_more:true 时手机立即续取，不因 call 快照已结束而漏掉尾页。\n\ninput.accepted 和 reply.started 的 payload 包含 input_id、reply_id。reply.delta 另带 delta(新增片段)；reply.completed 另带 text(最终全文，包含已发前缀)；reply.failed 另带 code；reply.interrupted 另带 reason。这些事件的通话、输入、回复和 epoch 必须匹配；手机只接收当前代次，旧结果不得覆盖已保存内容。\n\n四、打断与挂断\nPOST /calls/{call_id}/interrupt 接收 request_id、epoch、reason:\"interrupted\"，取消生成、递增 epoch，返回保持 active 的 {call}；有未完成回复先产生 reply.interrupted，再产生 call.interrupted。POST /calls/{call_id}/end 接收 request_id、epoch、reason:\"hangup\"，取消生成、递增 epoch，返回 ended 的 {call}；有未完成回复先产生 reply.interrupted，再产生 call.ended。保留已收到文字与中断原因，拒绝旧代次写入；过期代次用 stale_epoch 错误说明。\n\nreply.completed 只结束一句回复。收到 call.ended 或确认 call.status 为 ended 时，结束这通电话的上下文。若要在挂断后将摘要写回其他对话，应由后端的通话结束流程实现并去重，不能把每句完成、空事件页或网络超时当作挂断。" : {
-
+    "你是 Tincall 的接入助手。先确认对方要用独立模式、普通 MCP、MCP＋唤醒桥还是后端直连，再提供对应步骤。不要把普通模型 API 地址当成 Tincall 服务地址，也不要让对方把令牌贴进聊天。MCP 用于支持 MCP 工具的 AI 平台；后端接法用于自行实现 Tincall 通话接口的服务。\n\n资料仓库：https://github.com/chuli1122/Tincall\n接入细节和部署说明以仓库中的 README、connector 和文档为准。\n\n普通 MCP 接法\n\n一、在 AI 平台配置服务\n先在 Tincall「设置 → Tincall 云端」部署或连接支持 MCP 的服务，再编辑联系人，通话方式选 MCP、选择连接并保存。联系人页直接提供传输方式、URL 和 Authorization 的复制，推荐 HTTP（Streamable HTTP），平台仅支持旧 SSE 时再选 SSE。将 URL 填入平台 MCP 服务地址，将复制的 Authorization 填入同名请求头；地址已完整，不要重复追加 /mcp。Authorization 包含 Bearer 和联系人专用令牌，不要替换为手机令牌或 service-role 密钥。令牌只放私密服务配置，不贴进聊天。\n\n二、可用工具\n参数及必填项以 tools/list 为准：\n• tincall_call(contact_id?)：向手机发起来电，等待接听后返回，随后可通过 tincall_reply 打招呼。联系人专用凭据无需参数；其他身份按工具定义填写 contact_id。\n• tincall_get_call(call_id?, limit?, before_sequence?)：查看保存的通话文字、图片和当前状态；结束的通话可能另有摘要。按结果指引翻阅更早记录。日常对话使用 tincall_wait。\n• tincall_wait(call?)：等待新消息、接听或挂断，时长使用对应联系人的 MCP 等待设置。沿用本通电话返回的 8 字符 call 标记；仅发现新通话时省略。超时继续调用，不会挂断；播放停止不会让等待提前结束。\n• tincall_reply(call, text, wait_for_input?)：原样带回产生本次任务的 call 短标记，用 text 一次提交完整回复，默认继续等下一句话。告别时设置 wait_for_input:false，再调用 tincall_end。\n• tincall_end(call)：沿用同一个 call 短标记，通知手机等已收到的回复播放完成后挂断。手机手动挂断仍立即结束。\n• tincall_list_calls(limit?, before?)：列出保存的通话，按结果指引继续翻页，再用 get_call 查看选中的记录。\n\n三、接听、回复与续等\n对方要求主动打来时，AI 直接调用 tincall_call()，等接通结果返回后用 tincall_reply 提交问候。发言以 XML 返回：<message name=\"小白\" timestamp=\"2026-10-26 18:30:00\"><text>你好。</text></message>。未填写名字时省略 name，timestamp 仅在开启时间感知时提供，使用手机本地时间；图片作为紧随对应消息的原生 MCP image block 返回，不放进 XML 正文。AI 应读取实际图片，并用 text 提交完整回复。\n\n普通 MCP 的工具结果另有一行 call: XXXXXXXX。回复、挂断和继续等待时沿用这个 8 字符标记，不需要 UUID、轮次或游标。标记绑定原通话；原通话结束后迟到操作会被拒绝，不要换用新通话的标记重发旧回复或挂断指令。更新服务后，在平台刷新工具定义或重新连接。\n\n朗读要求在通话开始时提供一次，平台需保留同一对话的上下文并遵循要求。AI 写完全文再调用 tincall_reply。手机打断播放后，后续提交的完整回复仍可正常接收；等待应继续到对方说完并提交新消息。\n\n普通 MCP 的等待时长在联系人页设置，默认 120 秒，可填 1–130 秒，越界会自动调整。没有新消息时，按该联系人设置的时长等待，正常超时后继续调用 tincall_wait，整通电话不会因此结束。客户端若先报 Request timed out: tools/call，只说明没有取得结果，不能据此判断回复没有发送；不要重发已提交的正文，调用 tincall_wait 继续。通话结束后停止等待。\n\n时间感知在联系人「通话偏好」中设置，默认关闭。开启后，MCP 消息的 timestamp 属性表示发送时间，使用手机本地时区。可据此理解消息之间的时间间隔，不必每次提及时间。回复中无需附带时间戳。\n\n四、平台设置\nKelivo 的 MCP 请求超时默认 30 秒。请在 Kelivo 的 MCP 设置中调至 180 秒，再重新连接 Tincall。通话过程中，Kelivo 需要保持在前台。\n\nMuse 默认等待工具结果 45 秒，需要让 TA 调整调用工具时的等待时间；单次调用达到 120 秒会被转入后台，影响 TA 继续等待。建议将 Tincall 对应联系人的 MCP 等待时长设为 90 秒，并让 Muse 中的 TA 将工具等待时间设为 110 秒。这样 Tincall 会先结束本次等待；即使没有正常返回，Muse 也能在 110 秒时报告超时，让 TA 继续处理，避免拖到 120 秒被转入后台。\n\nTincall 的回复工具发送完整文字后，会继续等你下一句话；朗读和等待都占用这次请求的时间。Request timed out: tools/call 表示 AI 所在的平台没有及时收到工具结果，不代表回复没有发送，也不代表电话已经挂断。\n\n等待超时不会挂断通话，可以让 TA 继续等待。如果这一轮工具调用已经结束，可以主动发消息唤醒 TA，继续通话。播放停止不会提前结束等待。\n\n更新云端后，在 AI 平台刷新 Tincall 工具列表或断开后重连。\n\nMCP 不能自行唤醒任意闲置平台，也不能强制取消宿主模型的生成；手机拨号需外部平台保持运行或已有可用唤醒桥。工具请求时限和连续调用次数还受平台限制。历史摘要由手机在通话结束后实际生成并提交，没有摘要时不推测其原因。\n\nMCP＋唤醒桥接法\n\n在联系人编辑页的 MCP 模式中选择唤醒桥并保存，复制这位联系人的唤醒桥配置。接入程序负责持续订阅事件、读取完整输入，再启动外部 AI 任务；可使用仓库中的 connector/wake-adapter.mjs，具体配置按 connector/README.md 操作。平台启动命令需续接同一对话，读取 content 中的 XML 发言与紧随其后的原生图片块，保留首次朗读要求，并配置专用 MCP。AI 使用 tincall_reply 提交完整 text 后结束任务，新消息再触发下一次任务，无需调用 wait。仅导入普通 MCP 地址不会自动启动闲置的 AI。\n\n唤醒桥由适配器在任务专用的 MCP 请求头里自动绑定原通话，AI 仍然只提交 text，不需要填写 call。使用其他适配器时，也必须将取到的 input.call.id 固定到该任务每次 MCP 请求的 Tincall-Call-ID 头，不能换成后来的通话。\n\n后端接法\n\n一、连接与基础格式\n自有后端负责人物设定、上下文和真实生成，手机负责收音、识别、朗读和本地记录。后端实现下面的 HTTPS / JSON 通话接口，无需实现 MCP，也不必开启云端备份。手机在「Tincall 云端 → 连接已有服务」保存 HTTPS 基础地址和手机访问令牌、检查连接，再到联系人编辑页选择后端、该连接及对话对象。\n\n以下路径相对于基础地址。手机发送 Authorization: Bearer <手机访问令牌>，JSON 请求带 Content-Type: application/json 和 Accept: application/json；成功响应为 HTTP 200 的 JSON，不依赖重定向。错误返回非成功 HTTP 状态及 {error:{code:\"错误代码\"}}。写请求按 request_id 去重，相同请求重试返回原结果；同一 ID 不能更改内容。隔离不同访问身份的数据，不让客户端自行声明所有者。\n\ncall 对象必须包含 id(UUID)、contact_id(字符串)、source(\"backend\")、status(\"active\"/\"ringing\"/\"ended\")、epoch(非负整数)、last_sequence(非负整数)。一个 call_id 对应一通电话，message_id 对应一条输入，reply_id 对应一轮回复，不可混用。\n\n二、发现、开始和接听\nGET /capabilities 返回 {bindings:[{contact_id:\"联系人标识\",display_name:\"显示名\",generation_configured:true}]}；display_name 可省略，只有标识非空且 generation_configured:true 的对象才可在手机选择。\n\nPOST /calls 接收 request_id、call_id、contact_id、source:\"backend\"、expression_prompt，返回 {call}；新通话为 active、epoch:0，并产生 call.started 事件。GET /calls/current 返回 {call:对象或null}。如支持后端主动来电，已有 ringing 通话由 POST /calls/{call_id}/answer 接收 request_id、epoch、expression_prompt，返回 active 的 {call}，产生 call.started。expression_prompt 为语音表达要求，可为空；后端负责将其用于生成。\n\n三、输入与回复事件\nPOST /calls/{call_id}/input 接收 request_id、message_id、当前 epoch、text，以及可选 images。每张图片为 {id:\"UUID\",mime_type:\"image/jpeg或image/png\",data_base64:\"标准Base64\"}，最多四张、每张最多 5 MiB，Base64 不带 data URI 前缀。有图时 text 可为空，无图时文字须非空。返回 {call,input_id,reply_id,epoch}：input_id 等于 message_id，epoch 已递增一次。保存输入，取消旧生成，并产生 input.accepted、reply.started 后启动本轮生成。\n\nGET /calls/{call_id}/events?after=N&limit=100&wait=20 返回 {call,events,cursor,has_more}。事件结构为 {sequence,call_id,epoch,type,payload}，sequence 从 1 连续递增。after 默认 0，后续使用上次 cursor；已有事件立即返回，没有则等待新事件或到期返回 events:[]、cursor:N、has_more:false。空页不是挂断；has_more:true 时手机立即续取，不因 call 快照已结束而漏掉尾页。\n\ninput.accepted 和 reply.started 的 payload 包含 input_id、reply_id。reply.delta 另带 delta(新增片段)；reply.completed 另带 text(最终全文，包含已发前缀)；reply.failed 另带 code；reply.interrupted 另带 reason。这些事件的通话、输入、回复和 epoch 必须匹配；手机只接收当前代次，旧结果不得覆盖已保存内容。\n\n四、打断与挂断\nPOST /calls/{call_id}/interrupt 接收 request_id、epoch、reason:\"interrupted\"，取消生成、递增 epoch，返回保持 active 的 {call}；有未完成回复先产生 reply.interrupted，再产生 call.interrupted。POST /calls/{call_id}/end 接收 request_id、epoch、reason:\"hangup\"，取消生成、递增 epoch，返回 ended 的 {call}；有未完成回复先产生 reply.interrupted，再产生 call.ended。保留已收到文字与中断原因，拒绝旧代次写入；过期代次用 stale_epoch 错误说明。\n\nreply.completed 只结束一句回复。收到 call.ended 或确认 call.status 为 ended 时，结束这通电话的上下文。若要在挂断后将摘要写回其他对话，应由后端的通话结束流程实现并去重，不能把每句完成、空事件页或网络超时当作挂断。" : {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You are Tincall’s integration assistant. First confirm whether the person wants Standalone, ordinary MCP, MCP + Wake Bridge, or Direct Backend, then provide the corresponding steps. Do not mistake a regular model API endpoint for a Tincall service endpoint, or ask them to paste tokens into chat. MCP is for AI platforms with MCP tool support; the backend approach is for services implementing the Tincall call API.\n\nRepository: https://github.com/chuli1122/Tincall\nUse the repository’s README, connector, and documentation for integration and deployment details.\n\nOrdinary MCP integration\n\n1. Configure the service in the AI platform\nIn Tincall, deploy or connect an MCP-capable service under Settings → Tincall Cloud. Edit a contact, choose MCP and the connection, then save. The contact screen lets you copy the transport, URL, and Authorization separately. HTTP (Streamable HTTP) is recommended; choose SSE only if the platform supports only the older SSE transport. Put the URL in the platform’s MCP service address and the copied Authorization in the request header of the same name. The URL is complete; do not append /mcp again. Authorization includes Bearer and a contact-specific token. Do not substitute the phone access token or a service-role key. Keep tokens in private service settings, not in chat.\n\n2. Available tools\nUse tools/list as the authority for parameters and required fields:\n• tincall_call(contact_id?): call the phone and return after it is answered, then greet the person through tincall_reply. Contact-specific credentials need no parameters; other identities must supply contact_id as required by the tool schema.\n• tincall_get_call(call_id?, limit?, before_sequence?): view saved call text, images, and current status. Ended calls may also have a summary. Follow the result’s instructions to page through older records. Use tincall_wait for everyday conversation.\n• tincall_wait(call?): wait for new messages, an answer, or a hangup, using this contact’s MCP wait setting. Reuse the 8-character call marker returned for this call; omit it only when discovering a new call. Continue after a timeout; it does not hang up. Playback stopping does not end the wait early.\n• tincall_reply(call, text, wait_for_input?): return the unchanged call marker that produced this task, submit the full reply once in text, and wait for the next message by default. For a farewell, set wait_for_input:false, then call tincall_end.\n• tincall_end(call): reuse the same call marker to ask the phone to hang up after received speech finishes playing. A manual hangup on the phone still ends the call immediately.\n• tincall_list_calls(limit?, before?): list saved calls, follow the result’s pagination instructions, then use get_call to view the selected record.\n\n3. Answer, reply, and continue waiting\nWhen the person asks the AI to call them, invoke tincall_call() directly. After the answered result returns, submit a greeting through tincall_reply. Messages arrive as XML: <message name=\"Xiaobai\" timestamp=\"2026-10-26 18:30:00\"><text>Hello.</text></message>. Omit name when no name is set. timestamp is provided only when time awareness is enabled and uses the phone’s local time zone. Images arrive as native MCP image blocks immediately after the corresponding message, outside the XML body. Read the actual images and submit the full reply in text.\n\nOrdinary MCP tool results also include a line call: XXXXXXXX. Reuse this 8-character marker for replies, hangups, and continued waits; no UUID, turn number, or cursor is needed. The marker is bound to the original call. Late operations are rejected after that call ends. Do not substitute a new call’s marker to resend an old reply or hangup. After updating the service, refresh the platform’s tool definitions or reconnect.\n\nSpeech requirements are provided once at the start of the call. The platform must retain the conversation context and follow them. Finish writing the full reply before invoking tincall_reply. If playback is interrupted on the phone, a complete reply submitted afterward can still be received normally. Continue waiting until the person finishes speaking and submits a new message.\n\nOrdinary MCP wait duration is set on the contact screen. It defaults to 120 seconds and accepts 1–130 seconds; out-of-range values are adjusted automatically. With no new message, wait for the configured duration and continue calling tincall_wait after a normal timeout; this does not end the call. If the client first reports Request timed out: tools/call, that only means it did not receive a result, not that the reply was not sent. Do not resend submitted text; continue with tincall_wait. Stop waiting when the call ends.\n\nTime awareness is configured in Contact Call Preferences and is off by default. When enabled, an MCP message’s timestamp attribute is its send time in the phone’s local time zone. Use it to understand intervals between messages without mentioning the time every time. Replies do not need timestamps.\n\n4. Platform settings\nKelivo’s default MCP request timeout is 30 seconds. Change it to 180 seconds in Kelivo’s MCP settings, then reconnect Tincall. Keep Kelivo in the foreground during the call.\n\nMuse waits 45 seconds for tool results by default. Ask the AI to adjust its tool wait time. A call reaching 120 seconds is moved to the background, affecting continued waiting. Set this contact’s MCP wait duration in Tincall to 90 seconds and the AI’s tool wait time in Muse to 110 seconds. Tincall can then finish its wait first; if no result arrives, Muse can report a timeout at 110 seconds so the AI can continue before the 120-second background threshold.\n\nAfter sending the full reply, Tincall’s reply tool waits for your next message. Speech playback and waiting both count toward this request. “Request timed out: tools/call” means the AI platform did not receive the tool result in time; it does not mean the reply was not sent or the call ended.\n\nA wait timeout does not hang up. Ask the AI to keep waiting. If its current tool call has ended, send it a message to wake it and continue. Playback stopping does not end the wait early.\n\nAfter updating the cloud service, refresh the Tincall tools on your AI platform or disconnect and reconnect.\n\nMCP cannot wake arbitrary idle platforms or force the host model to cancel generation. Calls started on the phone need the external platform to stay running or have a working wake bridge. Tool request timeouts and consecutive-call limits also depend on the platform. The phone actually generates and submits a historical summary after the call ends; do not infer why a summary is missing.\n\nMCP + Wake Bridge integration\n\nIn the contact editor’s MCP mode, select Wake Bridge and save, then copy this contact’s wake configuration. The integration keeps subscribing to events, reads the full input, and starts an external AI task. You can use connector/wake-adapter.mjs from the repository; follow connector/README.md for configuration. The platform’s startup command must resume the same conversation, read XML messages and the native image blocks immediately following them from content, retain the initial speech requirements, and configure the dedicated MCP. The AI submits the full text through tincall_reply and finishes its task; a new message triggers the next task. No wait call is needed. Importing an ordinary MCP address alone does not start an idle AI.\n\nThe wake adapter automatically binds the original call in each task’s MCP request headers. The AI still submits only text and does not need to supply call. Other adapters must also pin the fetched input.call.id to the Tincall-Call-ID header of every MCP request for that task; never replace it with a later call.\n\nBackend integration\n\n1. Connection and base format\nA custom backend manages persona, context, and real generation. The phone handles capture, recognition, speech playback, and local records. Implement the HTTPS / JSON call endpoints below; MCP and cloud backups are not required. On the phone, save an HTTPS base URL and phone access token under Tincall Cloud → Connect an Existing Service and check the connection. Then choose Backend, that connection, and a conversation partner in the contact editor.\n\nAll paths below are relative to the base URL. The phone sends Authorization: Bearer <phone access token>. JSON requests use Content-Type: application/json and Accept: application/json. Successful responses are HTTP 200 JSON; do not depend on redirects. Errors use a non-success HTTP status and {error:{code:\"error_code\"}}. Deduplicate writes by request_id: an identical retry returns the original result; the same ID must not be reused with different content. Isolate data by authenticated identity rather than accepting a client-declared owner.\n\nA call object must contain id(UUID), contact_id(string), source(\"backend\"), status(\"active\"/\"ringing\"/\"ended\"), epoch(non-negative integer), and last_sequence(non-negative integer). A call_id identifies one call, message_id one input, and reply_id one reply turn. Do not interchange them.\n\n2. Discovery, starting, and answering\nGET /capabilities returns {bindings:[{contact_id:\"character_id\",display_name:\"Display name\",generation_configured:true}]}. display_name is optional. The phone only offers entries with a non-empty identifier and generation_configured:true.\n\nPOST /calls accepts request_id, call_id, contact_id, source:\"backend\", and expression_prompt, and returns {call}. A new call is active with epoch:0 and emits call.started. GET /calls/current returns {call:object or null}. If the backend supports incoming calls, POST /calls/{call_id}/answer accepts request_id, epoch, and expression_prompt for an existing ringing call, returns an active {call}, and emits call.started. expression_prompt contains speech expression requirements and may be empty; the backend is responsible for applying it during generation.\n\n3. Input and reply events\nPOST /calls/{call_id}/input accepts request_id, message_id, the current epoch, text, and optional images. Each image is {id:\"UUID\",mime_type:\"image/jpeg or image/png\",data_base64:\"standard Base64\"}. Up to four images are allowed, each at most 5 MiB; Base64 has no data URI prefix. text may be empty with images but must be non-empty without them. Return {call,input_id,reply_id,epoch}: input_id equals message_id and epoch has incremented once. Save the input, cancel any old generation, emit input.accepted and reply.started, and start this turn’s generation.\n\nGET /calls/{call_id}/events?after=N&limit=100&wait=20 returns {call,events,cursor,has_more}. Each event is {sequence,call_id,epoch,type,payload}; sequence increases consecutively from 1. after defaults to 0; subsequent requests use the previous cursor. Return existing events immediately, otherwise wait for new events or return events:[], cursor:N, has_more:false on timeout. An empty page is not a hangup. With has_more:true, the phone fetches the next page immediately, including remaining events when the call snapshot is already ended.\n\ninput.accepted and reply.started carry input_id and reply_id in payload. reply.delta also carries delta(new text); reply.completed carries text(the final full reply including its previously sent prefix); reply.failed carries code; reply.interrupted carries reason. Call, input, reply, and epoch must match. The phone accepts only the current epoch; old results must not overwrite saved content.\n\n4. Interruption and hangup\nPOST /calls/{call_id}/interrupt accepts request_id, epoch, and reason:\"interrupted\". Cancel generation, increment epoch, and return an active {call}. Emit reply.interrupted for an unfinished reply, then call.interrupted. POST /calls/{call_id}/end accepts request_id, epoch, and reason:\"hangup\". Cancel generation, increment epoch, and return an ended {call}. Emit reply.interrupted for an unfinished reply, then call.ended. Preserve received text and interruption reasons, reject old-epoch writes, and use stale_epoch for an outdated epoch.\n\nreply.completed ends only one reply. End the call’s context when call.ended is received or call.status is confirmed as ended. If summaries should be written back into another conversation after hangup, implement and deduplicate that work in the backend’s call-end flow. Do not treat each completed reply, an empty event page, or a network timeout as a hangup."
+          }
+        }
+      }
     },
     "你的邮箱" : {
       "extractionState" : "stale",
@@ -11356,7 +11403,14 @@
       }
     },
     "推荐 HTTP，仅支持 SSE 的平台再选 SSE。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HTTP is recommended. Choose SSE only if your platform requires it."
+          }
+        }
+      }
     },
     "推送连接、后台接听与定时来电" : {
       "extractionState" : "stale",
@@ -24326,6 +24380,576 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "The default contact is for manual setup. MCP contacts get separate identities when saved and do not use this default. Leave blank for backups or scheduled calls only."
+          }
+        }
+      }
+    },
+  "MCP OAuth 授权" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "MCP OAuth Authorization"
+        }
+      }
+    }
+  },
+  "云端仍有一通通话未结束。请先结束当前通话，再重新拨打。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Another call is still open on the server. End it before calling again."
+        }
+      }
+    }
+  },
+  "云端尚未确认 MCP 等待时长。请先更新连接端服务，再保存联系人设置。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The server has not confirmed the MCP wait duration. Update the connector service, then save the contact settings."
+        }
+      }
+    }
+  },
+  "仅显示已授权的联系人。保存关联后会添加 Tincall 专用通话号码，保留原有号码和邮箱；姓名与头像可选择同步。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Only contacts you have allowed are shown. Saving a link adds a dedicated Tincall call number while keeping existing numbers and emails. Name and photo sync is optional."
+        }
+      }
+    }
+  },
+  "使用系统电话拨打" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Call Using Phone"
+        }
+      }
+    }
+  },
+  "在 ChatGPT 或 Claude 添加 MCP 服务时选择 OAuth，将授权页显示的一次性授权码填在这里。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Choose OAuth when adding the MCP service in ChatGPT or Claude, then enter the one-time code shown on the authorization page here."
+        }
+      }
+    }
+  },
+  "在联系人「通话偏好」中开启「时间感知」，默认关闭。独立模式沿用原有时间上下文；MCP 和后端按手机记录的消息时间和时区提供协议时间标记，补发消息仍保留原来的消息时间，不改成重试时刻。\n\n这只是给 AI 的时间信息，不代表 AI 一定能准确判断现实时间。请先确认手机日期、时间和时区正确；后端或外部平台可能另有自己的时间上下文。\n\n回复中的协议时间标记会在手机显示和朗读前清理，正常对话里的日期与时间不会因此删除。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Enable time awareness in Contact Call Preferences. It is off by default. Standalone mode keeps its existing time context; MCP and backend modes receive the phone message time and time zone. Retried messages keep their original message time.\n\nThis gives the AI time information, but does not guarantee accurate real-world time reasoning. Check the phone date, time, and time zone.\n\nProtocol time markers in replies are removed before display and speech; ordinary dates and times remain."
+        }
+      }
+    }
+  },
+  "处理 MCP OAuth 授权" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Process MCP OAuth authorization"
+        }
+      }
+    }
+  },
+  "已授权。回到原授权页面刷新，继续连接。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Authorized. Return to the original authorization page and refresh it to finish connecting."
+        }
+      }
+    }
+  },
+  "手机与服务端的联系人通话模式不一致。请在联系人设置中重新选择并保存通话模式。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The contact's call mode differs between this phone and the server. Select and save the call mode again in contact settings."
+        }
+      }
+    }
+  },
+  "授权码已失效或已处理，请重新发起 MCP OAuth 连接。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "This code has expired or was already used. Start the MCP OAuth connection again."
+        }
+      }
+    }
+  },
+  "无法写入 Tincall 通话号码，原有号码未改动。请检查通讯录权限，或联系人是否只读。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Couldn’t add the Tincall call number. Existing numbers were kept. Check contact access or whether the contact is read-only."
+        }
+      }
+    }
+  },
+  "无法确定要拨打的 Tincall 联系人，请在 App 中选择。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Couldn’t identify the Tincall contact to call. Choose a contact in the app."
+        }
+      }
+    }
+  },
+  "时间感知使用哪里的时间？" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Where does time awareness get its time?"
+        }
+      }
+    }
+  },
+  "服务端找不到这个联系人。请在联系人设置中检查后端联系人或重新获取 MCP 配置。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The server cannot find this contact. Check the backend contact or fetch the MCP configuration again in contact settings."
+        }
+      }
+    }
+  },
+  "联系人身份与服务端配置冲突。请检查联系人绑定，确认选择了对应的服务端联系人。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The contact identity conflicts with the server configuration. Check that this contact is linked to the correct server contact."
+        }
+      }
+    }
+  },
+  "请求与已提交内容冲突。已收到的内容会保留，请返回联系人重新拨打；若仍出现，请更新连接端服务。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "This request conflicts with content already submitted. Received content is kept. Return to the contact and call again; if this continues, update the connector service."
+        }
+      }
+    }
+  },
+  "这个 MCP 客户端可以查看这位联系人的通话文字、发送回复及发起或结束通话。它不能访问其他联系人或云端备份。仅确认你刚刚发起的授权。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "This MCP client can read this contact’s call text, send replies, and start or end calls. It cannot access other contacts or cloud backups. Approve only a request you just initiated."
+        }
+      }
+    }
+  },
+  "这通通话已结束或不再存在。请返回联系人重新拨打。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "This call has ended or no longer exists. Return to the contact and call again."
+        }
+      }
+    }
+  },
+  "连接端找不到所需接口。请检查服务地址，并更新连接端服务。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The connector endpoint was not found. Check the service URL and update the connector service."
+        }
+      }
+    }
+  },
+  "连接端拒绝了此操作。请检查令牌权限及联系人授权。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The connector denied this operation. Check token permissions and contact authorization."
+        }
+      }
+    }
+  },
+  "连接端授权已失效。请在连接设置中检查或更新令牌后重试。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Connector authorization has expired. Check or update the token in connection settings, then retry."
+        }
+      }
+    }
+  },
+  "连接端服务暂时不可用。请稍后重试；若持续出现，请检查服务运行状态。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The connector service is temporarily unavailable. Try again later; if this continues, check its status."
+        }
+      }
+    }
+  },
+  "连接端未接受当前配置。请检查联系人、通话模式及服务版本后重试。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The connector rejected this configuration. Check the contact, call mode, and service version, then retry."
+        }
+      }
+    }
+  },
+  "连接端请求过于频繁。请稍等片刻再试。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "Too many connector requests. Wait a moment and try again."
+        }
+      }
+    }
+  },
+  "通话状态已变化。请在通话页面恢复连接；若通话已结束，请重新拨打。" : {
+    "localizations" : {
+      "en" : {
+        "stringUnit" : {
+          "state" : "translated",
+          "value" : "The call state has changed. Restore the connection from the call screen, or call again if the call has ended."
+        }
+      }
+    }
+  },
+    "正在保存" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saving"
+          }
+        }
+      }
+    },
+    "时间感知说明" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About Time Awareness"
+          }
+        }
+      }
+    },
+    "%@说明" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About %@"
+          }
+        }
+      }
+    },
+    "开启后会把消息的发送时间告诉 TA，使用手机的时间和时区。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share each message’s send time with the AI, using your phone’s date, time, and time zone."
+          }
+        }
+      }
+    },
+    "ChatGPT 接入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect ChatGPT"
+          }
+        }
+      }
+    },
+    "Claude 接入" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect Claude"
+          }
+        }
+      }
+    },
+    "1. 复制上面的完整 URL，地址已包含 /mcp，不要重复追加。传输方式选 HTTP。\n\n2. 在 ChatGPT 添加自定义 MCP，身份验证选择 OAuth，使用动态客户端注册。\n\n3. 授权页显示一次性授权码后，到 Tincall 的「设置 → Tincall 云端」打开对应连接的「MCP OAuth 授权」，输入授权码，选择这位联系人并同意。\n\n4. 回到刚才的授权网页完成连接，再返回 ChatGPT 加载工具。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. Copy the complete URL above. It already includes /mcp; do not append it again. Choose HTTP.\n\n2. Add a custom MCP in ChatGPT. Choose OAuth with dynamic client registration.\n\n3. When the authorization page shows a one-time code, open Settings → Tincall Cloud → the matching connection → MCP OAuth Authorization in Tincall. Enter the code, select this contact, and approve.\n\n4. Return to that authorization page to finish connecting, then return to ChatGPT and load the tools."
+          }
+        }
+      }
+    },
+    "1. 复制上面的完整 URL，填入 Claude 的 Add custom connector。\n\n2. Authentication 选择 Sign in now，OAuth client 选择 Register automatically，Transport 使用 Streamable HTTP。\n\n3. 授权页显示一次性授权码后，到 Tincall 的「设置 → Tincall 云端」打开对应连接的「MCP OAuth 授权」，输入授权码，选择这位联系人并同意。\n\n4. 回到刚才的授权网页完成连接，再返回 Claude 加载工具。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1. Copy the complete URL above into Claude’s Add custom connector.\n\n2. Choose Sign in now for Authentication, Register automatically for OAuth client, and Streamable HTTP for Transport.\n\n3. When the authorization page shows a one-time code, open Settings → Tincall Cloud → the matching connection → MCP OAuth Authorization in Tincall. Enter the code, select this contact, and approve.\n\n4. Return to that authorization page to finish connecting, then return to Claude and load the tools."
+          }
+        }
+      }
+    },
+    "其他支持请求头的平台可直接填写上面的 Authorization。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On other platforms that support custom headers, enter the Authorization value shown above."
+          }
+        }
+      }
+    },
+    "点右上角 ✓ 保存联系人后，可复制 URL 和 Authorization，填入 AI 平台的 MCP 服务设置。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save this contact with ✓ at the top right, then copy the URL and Authorization into your AI platform’s MCP settings."
+          }
+        }
+      }
+    },
+    "MCP 等待时长" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "MCP Wait Duration"
+          }
+        }
+      }
+    },
+    "MCP 等待时长说明" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About MCP Wait Duration"
+          }
+        }
+      }
+    },
+    "AI 回复后，最多等待你下一句话的时间。可填写 1–130 秒，默认 120 秒；超出范围会自动调整。\n\n等待超时不会挂断通话。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How long to wait for your next message after the AI replies. Enter 1–130 seconds; the default is 120 seconds. Values outside this range are adjusted automatically.\n\nA wait timeout does not end the call."
+          }
+        }
+      }
+    },
+    "秒" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "seconds"
+          }
+        }
+      }
+    },
+    "适合直接在支持 MCP 的 AI 平台中使用。支持 AI 主动来电；AI 调用回复工具后，工具会挂起等待你的下一句话，默认120秒，可根据对应平台客户端超时时间自行调整，超时后不会自动挂断。从 Tincall 拨号不能自动唤醒 AI；需要自动唤醒可选「MCP＋唤醒桥」。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For AI platforms that support MCP. The AI can call you. After replying, its tool waits for your next message for 120 seconds by default; adjust this to your platform’s client timeout. A timeout does not end the call. Calling from Tincall does not wake the AI automatically. Choose MCP + Wake Bridge if you need automatic wake-up."
+          }
+        }
+      }
+    },
+    "这套 Tincall 云端服务不支持当前 MCP 配置字段，通常是服务版本过旧。请在「设置 → Tincall 云端」检查服务版本并重新部署后，再保存联系人。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Tincall Cloud service does not support the current MCP configuration fields, usually because it is outdated. Check the service version under Settings → Tincall Cloud and redeploy before saving this contact."
+          }
+        }
+      }
+    },
+    "云端没有收到有效的 MCP 配置请求（原因：%@）。请检查服务地址和部署版本后重试。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server did not receive a valid MCP configuration request (reason: %@). Check the service URL and deployment version, then try again."
+          }
+        }
+      }
+    },
+    "未知原因" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown reason"
+          }
+        }
+      }
+    },
+    "云端拒绝了这次 MCP 配置（HTTP 400，原因：%@）。请检查服务版本和联系人配置后重试。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server rejected this MCP configuration (HTTP 400, reason: %@). Check the service version and contact settings, then try again."
+          }
+        }
+      }
+    },
+    "请在「%@」连接设置的页面底部勾选「已阅读隐私政策，同意上述数据发送。」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "At the bottom of “%@” connection settings, select “I have read the Privacy Policy and agree to the data sharing described above.”"
+          }
+        }
+      }
+    },
+    "云端未找到这位联系人的 MCP 身份。请确认所选云端连接，并重新获取 MCP 配置。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The server could not find this contact’s MCP identity. Check the selected cloud connection and fetch the MCP configuration again."
+          }
+        }
+      }
+    },
+    "正在检查服务版本…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking service version…"
+          }
+        }
+      }
+    },
+    "服务版本 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Service version %@"
+          }
+        }
+      }
+    },
+    "服务版本过旧，请重新部署。可在下方选择「部署或更新服务」；手动部署的服务请在原电脑或服务器更新。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This service is outdated. Choose “Deploy or Update Service” below. For a manually deployed service, update it on the original computer or server."
+          }
+        }
+      }
+    },
+    "刷新服务版本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Service Version"
+          }
+        }
+      }
+    },
+    "App 缺少有效的云端版本信息，请更新 App。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app’s cloud version information is invalid or missing. Update the app."
+          }
+        }
+      }
+    },
+    "无法读取 App 内的云端版本信息，请更新 App。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t read the app’s cloud version information. Update the app."
+          }
+        }
+      }
+    },
+    "未能检查服务版本，请检查连接、访问令牌和服务状态后刷新。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t check the service version. Check the connection, access token, and service status, then refresh."
+          }
+        }
+      }
+    },
+    "独立模式：Tincall 直接连接模型 API，设定与对话由手机管理。日常通话和本地记录无需部署云端。\n\n普通 MCP：外部平台管理 AI，AI 可发起来电并处理 Tincall 发起的通话；从 Tincall 拨出不会自动唤醒外部 AI。AI 回复后默认每次等你的下一句话 120 秒；普通 MCP 可在联系人 MCP 设置中填写 1–130 秒。没有新消息会提示继续等待，不会挂断通话。\n\nMCP＋唤醒桥：仍使用 MCP 通话，但由接通和每轮新输入的事件触发 AI，AI 回复后结束本轮，下次消息再启动，不必持续等待。新版一键部署包含通用桥；在联系人编辑页选择该模式并复制配置。平台须支持 SSE 订阅和任务启动，或运行相应适配程序。普通 MCP 设置不能代替这部分接入。\n\n后端直连：已有聊天后端直接实现 Tincall 通话接口，由它管理设定、上下文和每轮生成，无需 MCP。也可通过一键部署的服务转发到真正的生成与取消接口。\n\n四种方式的识别与朗读均由 Tincall 处理。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Independent Mode: Tincall connects directly to a model API. Your phone manages the settings and conversation. Everyday calls and local records do not require a cloud deployment.\n\nOrdinary MCP: An external platform manages the AI. The AI can call you and handle calls started in Tincall, but calling from Tincall does not wake it automatically. After replying, the AI waits up to 120 seconds for your next message by default. For ordinary MCP, enter 1–130 seconds in the contact’s MCP settings. If no message arrives, it can continue waiting; the call is not ended.\n\nMCP + Wake Bridge: Calls still use MCP, but connection and new-input events trigger the AI. After replying, the AI finishes its current task and is started again for the next message, without continuously waiting. The latest one-click deployment includes a general-purpose bridge. Select this mode in the contact editor and copy its configuration. Your platform must support SSE subscriptions and task startup, or run an appropriate adapter. Ordinary MCP settings cannot replace this integration.\n\nDirect Backend: An existing chat backend implements the Tincall call interface and manages settings, context, and generation for each turn, without MCP. The one-click service can also forward to your actual generation and cancellation endpoints.\n\nTincall handles speech recognition and playback in all four modes."
+          }
+        }
+      }
+    },
+    "普通 MCP 很快超时，或反复调用工具怎么办？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Why does ordinary MCP time out quickly or repeatedly call tools?"
+          }
+        }
+      }
+    },
+    "Kelivo 的 MCP 请求超时默认 30 秒。请在 Kelivo 的 MCP 设置中调至 180 秒，再重新连接 Tincall。通话过程中，Kelivo 需要保持在前台。\n\nMuse 默认等待工具结果 45 秒，需要让 TA 调整调用工具时的等待时间；单次调用达到 120 秒会被转入后台，影响 TA 继续等待。建议将 Tincall 对应联系人的 MCP 等待时长设为 90 秒，并让 Muse 中的 TA 将工具等待时间设为 110 秒。这样 Tincall 会先结束本次等待；即使没有正常返回，Muse 也能在 110 秒时报告超时，让 TA 继续处理，避免拖到 120 秒被转入后台。\n\nTincall 的回复工具发送完整文字后，会继续等你下一句话；朗读和等待都占用这次请求的时间。Request timed out: tools/call 表示 AI 所在的平台没有及时收到工具结果，不代表回复没有发送，也不代表电话已经挂断。\n\n等待超时不会挂断通话，可以让 TA 继续等待。如果这一轮工具调用已经结束，可以主动发消息唤醒 TA，继续通话。播放停止不会提前结束等待。\n\n更新云端后，在 AI 平台刷新 Tincall 工具列表或断开后重连。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kelivo’s default MCP request timeout is 30 seconds. Change it to 180 seconds in Kelivo’s MCP settings, then reconnect Tincall. Keep Kelivo in the foreground during the call.\n\nMuse waits 45 seconds for tool results by default. Ask the AI to adjust its tool wait time. A call reaching 120 seconds is moved to the background, affecting continued waiting. Set this contact’s MCP wait duration in Tincall to 90 seconds and the AI’s tool wait time in Muse to 110 seconds. Tincall can then finish its wait first; if no result arrives, Muse can report a timeout at 110 seconds so the AI can continue before the 120-second background threshold.\n\nAfter sending the full reply, Tincall’s reply tool waits for your next message. Speech playback and waiting both count toward this request. “Request timed out: tools/call” means the AI platform did not receive the tool result in time; it does not mean the reply was not sent or the call ended.\n\nA wait timeout does not hang up. Ask the AI to keep waiting. If its current tool call has ended, send it a message to wake it and continue. Playback stopping does not end the wait early.\n\nAfter updating the cloud service, refresh the Tincall tools on your AI platform or disconnect and reconnect."
           }
         }
       }

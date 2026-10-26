@@ -88,7 +88,7 @@ enum DataSharingConsent {
 
     static func require(_ connection: ConnectionProfile) throws {
         guard isAllowed(connection) else {
-            throw TincallError(message: String(localized: "请先打开此连接的设置，确认接收方并允许数据发送：\(connection.name)"))
+            throw TincallError(message: String(localized: "请在「\(connection.name)」连接设置的页面底部勾选「已阅读隐私政策，同意上述数据发送。」"))
         }
     }
 

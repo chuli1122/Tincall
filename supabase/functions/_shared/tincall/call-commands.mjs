@@ -29,13 +29,17 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
 
   async function bindingFor(owner, contact) {
     const configured = getBinding(config, owner, contact);
-    if (configured) return configured;
-    return (await store.mcpRoleCommand(owner, 'binding', {contact_id: contact})).binding;
+    if (configured && configured.mode !== 'tools') return configured;
+    const saved = (await store.mcpRoleCommand(owner, 'binding', {contact_id: contact})).binding;
+    return configured ? {...configured,...(saved ? {mcp_wait_timeout_seconds:saved.mcp_wait_timeout_seconds} : {})} : saved;
   }
 
   async function upsertMCPRole(principal, payload) {
     ensure(!principal.contact_id, 'forbidden', 403);
-    ensure(Object.keys(payload).every(key => ['role_id','contact_id','display_name'].includes(key)), 'invalid_role');
+    ensure(Object.keys(payload).every(key => ['role_id','contact_id','display_name','mcp_wait_timeout_seconds'].includes(key)), 'invalid_role');
+    if (payload.mcp_wait_timeout_seconds !== undefined) {
+      ensure(Number.isInteger(payload.mcp_wait_timeout_seconds) && payload.mcp_wait_timeout_seconds >= 1 && payload.mcp_wait_timeout_seconds <= 130, 'invalid_mcp_wait_timeout_seconds');
+    }
     const roleId = uuid(payload.role_id, 'role_id').toLowerCase();
     const contact = requiredText(payload.contact_id, 'contact_id', 200);
     const displayName = requiredText(payload.display_name, 'display_name', 200).trim();
@@ -45,6 +49,7 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
     const token = 'tcmcp_' + Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, '0')).join('');
     const role = await store.mcpRoleCommand(principal.owner_id, 'upsert', {
       role_id: roleId, contact_id: contact, display_name: displayName, token,
+      ...(payload.mcp_wait_timeout_seconds !== undefined ? {mcp_wait_timeout_seconds:payload.mcp_wait_timeout_seconds} : {}),
     });
     // The client appends this to its saved public service URL, not an internal proxy URL.
     return {...role, mcp_path: 'mcp'};
@@ -57,6 +62,7 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
   }
   async function command(principal, action, payload, signal) {
     const p = {...payload};
+    let source = p.source;
     let liveActivityPush;
     let callAccessExpiry;
     if (!['call.current','call.list','call.record','call.inputs','call.events','record.get','record.list','schedule.list'].includes(action)) uuid(p.request_id, 'request_id');
@@ -77,6 +83,7 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
     } else if (action.startsWith('call.') || action.startsWith('reply.') || action === 'summary.put') {
       if (!['call.current','call.list'].includes(action)) {
         const data = await scopedCall(principal, p.call_id, signal);
+        source = data.call.source;
         if (action === 'call.activity') {
           // Only the phone's owner credential can start a card, and only for
           // an accepted call. MCP credentials cannot target registered devices.
@@ -162,9 +169,28 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
       ensure(typeof p.user_name==='string' && p.user_name.length<=200,'invalid_user_name');
       if(action==='call.accept')await store.mcpCommand(principal.owner_id,null,'profile',{call_id:p.call_id,user_name:p.user_name});
     }
-    if (action === 'call.accept' && typeof p.expression_prompt === 'string' && store.setVoicePrompt) {
+    let voicePrompt = typeof p.expression_prompt === 'string' ? p.expression_prompt : undefined;
+    if (p.time_awareness_enabled !== undefined || (['call.create','call.accept'].includes(action) && p.time_zone !== undefined)) {
+      // Only the phone may select call preferences. A role credential cannot
+      // change them while initiating a remote call.
+      ensure(!principal.contact_id, 'forbidden', 403);
+      ensure(['call.create','call.accept'].includes(action), 'invalid_time_awareness');
+      ensure(typeof p.time_awareness_enabled === 'boolean', 'invalid_time_awareness');
+      if (p.time_awareness_enabled) {
+        ensure(typeof p.time_zone === 'string' && p.time_zone.length > 0 && p.time_zone.length <= 100, 'invalid_time_zone');
+        try { new Intl.DateTimeFormat('en', {timeZone:p.time_zone}); }
+        catch { throw new ConnectorError('invalid_time_zone'); }
+        if (source === 'mcp') {
+          const timeInstruction = '时间感知：timestamp 是消息的发送时间，使用手机本地时区。可据此理解消息之间的时间间隔，不必每次提及时间。回复中无需附带时间戳。';
+          voicePrompt = [voicePrompt, timeInstruction].filter(Boolean).join('\n');
+        }
+      } else {
+        ensure(p.time_zone === undefined, 'invalid_time_zone');
+      }
+    }
+    if (action === 'call.accept' && voicePrompt !== undefined && store.setVoicePrompt) {
       // Save before changing ringing to active, so the first active wait cannot race the prompt update.
-      await store.setVoicePrompt(principal.owner_id, p.call_id, p.expression_prompt);
+      await store.setVoicePrompt(principal.owner_id, p.call_id, voicePrompt);
     }
     if (action === 'record.put') {
       const messages = p.record?.messages ?? p.record?.call?.messages;
@@ -191,8 +217,8 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
       }
     }
     let data = await store.command(principal.owner_id, action, p, {signal});
-    if ((action === 'call.create' || action === 'call.incoming') && typeof p.expression_prompt === 'string' && store.setVoicePrompt) {
-      await store.setVoicePrompt(principal.owner_id, p.call_id, p.expression_prompt);
+    if ((action === 'call.create' || action === 'call.incoming') && voicePrompt !== undefined && store.setVoicePrompt) {
+      await store.setVoicePrompt(principal.owner_id, p.call_id, voicePrompt);
     }
     if(action==='call.create' && p.user_name!==undefined)await store.mcpCommand(principal.owner_id,null,'profile',{call_id:p.call_id,user_name:p.user_name});
     if (action === 'call.accept' || action === 'call.create') {

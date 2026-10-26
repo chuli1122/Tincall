@@ -305,8 +305,7 @@ final class XunfeiSpeechRecognizer: SpeechRecognizer {
                         let chunk = Data(pending.prefix(1280))
                         pending.removeFirst(1280)
                         if let nextFrameAt { try await clock.sleep(until: nextFrameAt) }
-                        let frameStartedAt = clock.now
-                        try await self.sendFrame(chunk, status: first ? 0 : 1, on: task)
+                        let frameStartedAt = try await self.sendFrame(chunk, status: first ? 0 : 1, on: task)
                         nextFrameAt = frameStartedAt.advanced(by: .milliseconds(40))
                         guard !Task.isCancelled, self.generation == sessionGeneration else { return }
                         first = false
@@ -425,23 +424,27 @@ final class XunfeiSpeechRecognizer: SpeechRecognizer {
         }
     }
 
-    private func sendFrame(_ pcm: Data, status: Int, on socket: URLSessionWebSocketTask) async throws {
+    @discardableResult
+    private func sendFrame(_ pcm: Data, status: Int, on socket: URLSessionWebSocketTask) async throws -> ContinuousClock.Instant {
         var frame: [String: Any] = ["data": ["status": status, "format": "audio/L16;rate=16000", "encoding": "raw", "audio": pcm.base64EncodedString()]]
         if status == 0 {
             frame["common"] = ["app_id": credentials.xunfeiAppID]
             frame["business"] = ["language": "zh_cn", "domain": "iat", "accent": "mandarin", "dwa": "wpgs", "eos": 2000]
         }
         let data = try JSONSerialization.data(withJSONObject: frame)
-        try await sendSocketMessage(.string(String(decoding: data, as: UTF8.self)), on: socket)
+        return try await sendSocketMessage(.string(String(decoding: data, as: UTF8.self)), on: socket)
     }
 
-    private func sendSocketMessage(_ message: URLSessionWebSocketTask.Message, on socket: URLSessionWebSocketTask) async throws {
+    private func sendSocketMessage(_ message: URLSessionWebSocketTask.Message, on socket: URLSessionWebSocketTask) async throws -> ContinuousClock.Instant {
         let timeout = Task {
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
             socket.cancel(with: .goingAway, reason: nil)
         }
         defer { timeout.cancel() }
+        // Frame preparation must not consume the interval before the next send.
+        let startedAt = ContinuousClock.now
         try await socket.send(message)
+        return startedAt
     }
 
     private func report(_ error: Error) async {

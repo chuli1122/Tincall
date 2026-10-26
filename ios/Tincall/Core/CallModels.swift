@@ -34,6 +34,9 @@ struct ConnectionProfile: Identifiable, Codable, Equatable, Sendable {
     var region: String?
     /// Nil uses the supplier/model default; an explicitly empty value disables these instructions.
     var expressionPrompt: String?
+    /// Nil leaves the voice's ElevenLabs setting unchanged.
+    var elevenLabsStability: Double?
+    var elevenLabsSimilarityBoost: Double?
     /// Nil omits optional generation parameters. Anthropic requires an output limit and defaults to 4096.
     var temperature: Double?
     var topP: Double?
@@ -89,6 +92,7 @@ struct LinkedContact: Codable, Equatable, Sendable {
     var givenName: String?
     /// Selected contact only; used locally for system incoming-call matching.
     var phoneNumber: String?
+    var phoneNumbers: [String]?
     var emailAddress: String?
 }
 
@@ -103,6 +107,9 @@ struct MCPRoleConfiguration: Codable, Equatable, Sendable {
     let display_name: String
     let token: String
     let token_created: Bool
+    var mcp_wait_timeout_seconds: Int? = nil
+
+    var effectiveMCPWaitTimeoutSeconds: Int { min(130, max(1, mcp_wait_timeout_seconds ?? 120)) }
 
     func validate(connection: ConnectionProfile, contactID: String) throws {
         guard connection.provider == .genericConnector, let base = connection.endpoint,
@@ -142,6 +149,8 @@ struct CallRole: Identifiable, Codable, Equatable, Sendable {
     var callMode: CallMode?
     /// A local choice of MCP integration; missing in older contacts means ordinary MCP.
     var mcpWakeBridgeEnabled: Bool?
+    /// Missing in existing contacts uses the recommended wait below client timeouts.
+    var mcpWaitTimeoutSeconds: Int?
     /// Overrides the reusable TTS connection's default voice for this role.
     var voiceID: String = ""
     var systemPrompt: String = ""
@@ -160,10 +169,13 @@ struct CallRole: Identifiable, Codable, Equatable, Sendable {
     /// Manual details remain intact while a system contact is linked.
     var avatarData: Data?
     var linkedContact: LinkedContact?
+    /// Stable local calling address, allocated once and saved with the role.
+    var systemCallPhoneNumber: String?
     /// Missing in legacy records means follow the linked contact, as before.
     var syncSystemContactDetails: Bool?
 
     var effectiveCallMode: CallMode { callMode ?? .standalone }
+    var effectiveMCPWaitTimeoutSeconds: Int { min(130, max(1, mcpWaitTimeoutSeconds ?? 120)) }
 
     /// Each newly registered role has its own stable identity, independent of connection defaults.
     var mcpContactID: String {
@@ -400,6 +412,8 @@ struct ExternalPendingInput: Codable, Equatable, Sendable {
     let messageID: UUID
     let replyMessageID: UUID
     let epoch: Int
+    /// Freeze the timestamp format across retries; nil preserves legacy/plain input.
+    var timeZone: String?
 }
 
 struct ExternalPendingControl: Codable, Equatable, Sendable {

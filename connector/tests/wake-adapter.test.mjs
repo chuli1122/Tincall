@@ -37,17 +37,20 @@ test('pagination recovers a changed epoch, deduplicates messages and carries act
     if (reads === 3) assert.equal(query.get('epoch'), null, 'changed epoch restarts without the old cursor');
     if (reads === 4) assert.equal(query.get('sequence'), '1');
     return Response.json({structuredContent: {
-      event: 'input', messages: [{id: epoch + '-one', text: epoch ? 'current' : 'superseded'},
-        ...(reads === 4 ? [{id: '1-two', text: 'supplement'}] : [])],
+      event: 'input', messages: [{id: epoch + '-one', role:'user', text: epoch ? 'current' : 'superseded', images:[{id:'first-image'}]},
+        ...(reads === 4 ? [{id: '1-two', role:'user', text: '[2026-10-26 15:30:00]\nsupplement', images:[{id:'second-image'}]}] : [])],
       call: {epoch}, reply: {epoch, reply_to: epoch + '.target'},
       cursor: {epoch, sequence: more ? 1 : 2}, has_more: more,
       voice_instructions: 'Synthetic voice instruction',
-    }, content: [image]});
+    }, content: reads === 4 ? [image,image] : [image]});
   };
   const input = await readWakeInput(config, new AbortController().signal, fetcher);
   assert.equal(reads, 4);
-  assert.deepEqual(input.messages.map(item => item.text), ['current', 'supplement']);
-  assert.deepEqual(input.content, [image]);
+  assert.deepEqual(input.messages.map(item => item.text), ['current', '[2026-10-26 15:30:00]\nsupplement']);
+  assert.deepEqual(input.content, [
+    {type:'text',text:'<message>\n  <text>current</text>\n</message>'}, image,
+    {type:'text',text:'<message timestamp="2026-10-26 15:30:00">\n  <text>supplement</text>\n</message>'}, image,
+  ]);
   assert.equal(input.reply.reply_to, '1.target');
 });
 
@@ -162,7 +165,7 @@ test('adapter starts commands after pagination, retries, coalesces reconnects, q
       const url = new URL(process.env.TINCALL_MCP_URL);
       const observed = await fetch(new URL('/fixture-task', url), {method:'POST', body:text});
       if (!observed.ok) process.exit(1);
-      if (input.messages.at(-1).text === 'Hold task') {
+      if (input.content.at(-1).text.includes('<text>Hold task</text>')) {
         process.on('SIGTERM', () => {
           fetch(new URL('/fixture-cancel', url)).finally(() => process.exit(0));
         });
@@ -178,8 +181,9 @@ test('adapter starts commands after pagination, retries, coalesces reconnects, q
     running.catch(() => {});
     await until(() => replies.length === 1);
     assert.equal(tasks.length, 2, 'failed command must be retried without another wake');
-    assert.equal(tasks[1].messages.length, 55, 'all pages precede task launch');
-    assert.equal(tasks[1].messages[54].text, 'Synthetic message 54');
+    assert.equal(tasks[1].content.length, 55, 'all pages precede task launch');
+    assert.equal(tasks[1].content[54].text, '<message>\n  <text>Synthetic message 54</text>\n</message>');
+    assert.equal(Object.hasOwn(tasks[1],'messages'),false,'AI input must not duplicate XML with plain message text');
     assert.ok(tasks[1].voice_instructions);
     assert.ok(!JSON.stringify(tasks[1]).includes('Bearer'), 'credential must not enter the AI input');
     assert.ok(!logs.join('\n').includes('Synthetic message'));
@@ -195,7 +199,7 @@ test('adapter starts commands after pagination, retries, coalesces reconnects, q
     await until(() => replies.length === 3);
     assert.equal(cancelled, 0, 'new input must not cancel a complete-message task');
     assert.equal(tasks.length, 4);
-    assert.equal(tasks[3].messages.at(-1).text, 'Replacement input');
+    assert.equal(tasks[3].content.at(-1).text, '<message>\n  <text>Replacement input</text>\n</message>');
     assert.equal(tasks[2].voice_instructions, undefined);
     assert.doesNotMatch(JSON.stringify(tasks[2]), /reply_to|epoch|sequence|cursor|call_id/);
     await post('/wake/config', {contact_id: 'linked', rotate: true});

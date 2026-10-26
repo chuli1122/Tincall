@@ -49,7 +49,7 @@
 
 ## MCP 工具返回
 
-标准 MCP 模式下，`tincall_get_call` 返回通话状态和已保存的消息；`tincall_wait` 等待下一条消息、接听或挂断事件；`tincall_reply` 发送完整回复，默认随后等待下一条输入。这些结果包含图片消息时，会在 `content` 中返回可读文字、图片组说明和标准 MCP 图片内容，不返回 `structuredContent` 或 JSON 消息快照。
+标准 MCP 模式下，`tincall_get_call` 返回通话状态和已保存的消息；`tincall_wait` 等待下一条消息、接听或挂断事件；`tincall_reply` 发送完整回复，默认随后等待下一条输入。结果中的每条发言以 XML 文字呈现，原生 MCP image block 紧随对应消息，不把图片塞进 XML 正文，也不返回 `structuredContent` 或重复的 JSON 消息快照。
 
 普通 MCP 结果中的 `call` 是 8 字符通话标记，回复、挂断和继续等待时沿用它，防止旧任务串入新通话；不需要 UUID、轮次或旧版游标。唤醒桥由适配器在任务专用请求头里绑定原通话，AI 不填写标记。
 
@@ -58,15 +58,14 @@
 ```json
 {
   "content": [
-    {"type": "text", "text": "用户（图片组 1）：\n请看这张图片。"},
-    {"type": "text", "text": "图片组 1 · 图片 1"},
+    {"type": "text", "text": "<message name=\"小白\" timestamp=\"2026-10-26 18:30:00\">\n  <text>请看这张图片。</text>\n</message>"},
     {"type": "image", "data": "完整标准 Base64", "mimeType": "image/jpeg"}
   ],
   "isError": false
 }
 ```
 
-图片组按本次返回中含图片消息的顺序编号，每组内再按图片数组顺序编号，文字中的组号与后续图片说明对应。无图结果不附带图片内容。对面平台需要支持 MCP image content，并将其交给具备视觉能力的模型。
+name 来自手机个人资料，名字为空时省略；历史中的 AI 发言使用 name="TA"。开启时间感知时，对方消息有 timestamp，格式为手机本地时间 `yyyy-MM-dd HH:mm:ss`。`<text>` 保留原话并转义 XML 特殊字符；纯图片消息为空 `<text>`。未完成／中断／失败消息可带 status、reason 属性。多张图片按原数组顺序紧随所属消息，无图消息不附图片块。所接平台需将原生图片交给具备视觉能力的模型。唤醒桥启动命令的 content 使用同一格式。
 
 图片成功读取后才会推进消息交付位置，读取失败可重试。若回复已经保存、但随后等待或读取下一条输入的图片失败，工具仍返回 `isError:false`，并明确提示“回复已保存，等待下一条消息失败”，要求调用 `tincall_wait` 继续等待；不要重发已保存的回复，也不要自行构造旧版游标参数。其他失败按实际错误提示处理，不能一律视为回复已保存。
 

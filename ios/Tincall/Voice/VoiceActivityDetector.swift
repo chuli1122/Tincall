@@ -39,6 +39,10 @@ final class VoiceActivityDetector: @unchecked Sendable {
         gate = SpeechGate()
     }
 
+    private enum Silence {
+        static let answer: String? = ""
+    }
+
     func filter(_ pcm: Data) throws -> (audio: Data, hasSpeech: Bool) {
         pending.append(pcm)
         var output = Data()

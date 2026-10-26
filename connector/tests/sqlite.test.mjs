@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,readdirSync} from 'node:fs';
+import {mkdtempSync,rmSync,readdirSync,renameSync,mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
@@ -49,6 +49,18 @@ test('SQLite upgrades missing voice columns without losing calls, receipts, or m
   f.restart();assert.equal((await f.store.claimVoiceInstructions(owner,call)).voice_instructions,null);
 });
 
+test('SQLite adds MCP wait preferences while retaining enrolled identities and credentials',async t=>{
+  const f=fixture(t),role={role_id:crypto.randomUUID(),contact_id:'synthetic',display_name:'Synthetic',token:'tcmcp_'+'a'.repeat(64)};
+  const enrolled=await f.store.mcpRoleCommand(owner,'upsert',role);
+  const db=new DatabaseSync(f.path);db.exec('ALTER TABLE tincall_mcp_roles DROP COLUMN mcp_wait_timeout_seconds');db.close();
+  f.restart();
+  const saved=await f.store.mcpRoleCommand(owner,'upsert',role);
+  assert.equal(saved.token,enrolled.token);
+  assert.equal(saved.token_created,false);
+  assert.equal(saved.mcp_wait_timeout_seconds,120);
+  assert.equal((await f.store.mcpRoleCommand(owner,'binding',{contact_id:'synthetic'})).binding.mcp_wait_timeout_seconds,120);
+});
+
 test('SQLite voice claim is atomic across processes and prompt retries never reset it',async t=>{
   const f=fixture(t);const call=crypto.randomUUID();
   await f.store.command(owner,'call.incoming',mutation({call_id:call,contact_id:'tools',source:'mcp'}));
@@ -71,6 +83,8 @@ test('SQLite media streams persist, reject overwrite, isolate owners and clean t
   assert.equal((await f.store.media(owner.toUpperCase(),record.toUpperCase(),asset.toUpperCase(),request())).status,200);
   await assert.rejects(f.store.media(owner,record,asset,request()),{code:'media_exists'});
   await assert.rejects(f.store.media(other,record,asset,new Request('http://localhost/media')),{code:'media_not_found'});
+  const old=new DatabaseSync(f.path);
+  old.exec('ALTER TABLE tincall_media DROP COLUMN deleted');old.close();
   f.restart();const downloaded=await f.store.media(owner,record,asset,new Request('http://localhost/media'));
   assert.equal(await downloaded.text(),'synthetic media');assert.equal(downloaded.headers.get('content-type'),'audio/wav');assert.equal(downloaded.headers.get('location'),null);
   await assert.rejects(f.store.media(owner,record,crypto.randomUUID(),new Request('http://localhost/media',{method:'PUT',headers:{'Content-Type':'audio/wav','Content-Length':String(512*1024*1024+1)},body:'x'})),{code:'media_too_large'});
@@ -96,6 +110,63 @@ test('SQLite bounds media cleanup and retries the same committed deletion',async
   assert.equal(db.prepare('SELECT count(*) n FROM tincall_media').get().n,1);
   await f.store.deleteRecordMedia(owner,record);assert.equal(db.prepare('SELECT count(*) n FROM tincall_media').get().n,0);db.close();
 });
+
+for(const mode of ['single','record']) {
+  test(`SQLite ${mode} media deletion preserves files on SQL rollback`,async t=>{
+    const f=fixture(t),record=crypto.randomUUID(),assets=[crypto.randomUUID(),crypto.randomUUID()];
+    for(const asset of assets)await f.store.media(owner,record,asset,new Request('http://localhost/media',{method:'PUT',headers:{'Content-Type':'audio/wav'},body:asset}));
+    const db=new DatabaseSync(f.path);t.after(()=>db.close());
+    const blocked=mode==='single'?assets[0]:assets[1];
+    // Abort the logical deletion through the real SQLite engine.
+    for(const event of ['UPDATE','DELETE'])db.exec(`CREATE TRIGGER block_media_${event} BEFORE ${event} ON tincall_media
+      WHEN OLD.asset_id='${blocked}' BEGIN SELECT RAISE(ABORT,'synthetic deletion failure'); END;`);
+    const remove=()=>mode==='single'
+      ?f.store.media(owner,record,assets[0],new Request('http://localhost/media',{method:'DELETE'}))
+      :f.store.deleteRecordMedia(owner,record);
+    await assert.rejects(remove(),{code:mode==='single'?'database_request_failed':'media_cleanup_failed'});
+    for(const asset of assets)assert.equal(await (await f.store.media(owner,record,asset,new Request('http://localhost/media'))).text(),asset);
+    db.exec('DROP TRIGGER block_media_UPDATE; DROP TRIGGER block_media_DELETE;');
+    await remove();
+    assert.equal(readdirSync(f.path+'.media').length,mode==='single'?1:0);
+  });
+
+  test(`SQLite ${mode} media cleanup retries after filesystem failure and restart`,async t=>{
+    const f=fixture(t),record=crypto.randomUUID(),asset=crypto.randomUUID();
+    await f.store.media(owner,record,asset,new Request('http://localhost/media',{method:'PUT',headers:{'Content-Type':'audio/wav'},body:'synthetic media'}));
+    const file=join(f.path+'.media',readdirSync(f.path+'.media')[0]),held=file+'.held';
+    renameSync(file,held);mkdirSync(file); // unlink fails without relying on OS permissions.
+    const remove=()=>mode==='single'
+      ?f.store.media(owner,record,asset,new Request('http://localhost/media',{method:'DELETE'}))
+      :f.store.deleteRecordMedia(owner,record);
+    await assert.rejects(remove(),{code:'media_cleanup_failed'});
+    f.restart();
+    await assert.rejects(f.store.media(owner,record,asset,new Request('http://localhost/media')),{code:'media_not_found'});
+    rmSync(file,{recursive:true});renameSync(held,file);
+    await remove();await remove();
+    assert.deepEqual(readdirSync(f.path+'.media'),[]);
+    // An already-removed file remains a successful, idempotent deletion.
+    await f.store.media(owner,record,asset,new Request('http://localhost/media',{method:'PUT',headers:{'Content-Type':'audio/wav'},body:'replacement'}));
+    rmSync(join(f.path+'.media',readdirSync(f.path+'.media')[0]));
+    await remove();
+  });
+
+  test(`SQLite ${mode} media cleanup retries after file removal and SQL failure`,async t=>{
+    const f=fixture(t),record=crypto.randomUUID(),asset=crypto.randomUUID();
+    await f.store.media(owner,record,asset,new Request('http://localhost/media',{method:'PUT',headers:{'Content-Type':'audio/wav'},body:'synthetic media'}));
+    const db=new DatabaseSync(f.path);t.after(()=>db.close());
+    db.exec("CREATE TRIGGER block_cleanup BEFORE DELETE ON tincall_media BEGIN SELECT RAISE(ABORT,'synthetic cleanup failure'); END;");
+    const remove=()=>mode==='single'
+      ?f.store.media(owner,record,asset,new Request('http://localhost/media',{method:'DELETE'}))
+      :f.store.deleteRecordMedia(owner,record);
+    await assert.rejects(remove(),{code:'media_cleanup_failed'});
+    assert.deepEqual(readdirSync(f.path+'.media'),[]);
+    f.restart();
+    await assert.rejects(f.store.media(owner,record,asset,new Request('http://localhost/media')),{code:'media_not_found'});
+    db.exec('DROP TRIGGER block_cleanup');
+    await remove();
+    assert.equal(db.prepare('SELECT count(*) n FROM tincall_media').get().n,0);
+  });
+}
 
 test('SQLite worker leases expire without regeneration and missed rings release the live slot',async t=>{
   const f=fixture(t);const call=crypto.randomUUID();

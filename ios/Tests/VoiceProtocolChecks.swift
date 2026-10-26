@@ -8,6 +8,7 @@ struct VoiceProtocolChecks {
     static func main() throws {
         if CommandLine.arguments.contains("--speech-segments-only") {
             try checkTutorialSegments()
+            try checkEnglishWordSegments()
             try checkTagScope()
             try checkExpressionSegments()
             checkDisplayText()
@@ -22,6 +23,7 @@ struct VoiceProtocolChecks {
         try checkWhisper()
         try checkFish()
         try checkTutorialSegments()
+        try checkEnglishWordSegments()
         try checkTagScope()
         try checkExpressionSegments()
         checkDisplayText()
@@ -178,10 +180,12 @@ struct VoiceProtocolChecks {
         precondition(later.count == 1 && later[0].bodyCount == 21)
         var exact = SpeechSegmenter()
         let cap = try exact.append(String(repeating: "甲", count: 48), final: false)
-        precondition(cap.count == 1 && cap[0].bodyCount == 48)
+        precondition(cap.isEmpty, "Reaching the former character cap must not split a sentence")
+        let naturalEnd = try exact.append(String(repeating: "乙", count: 25) + "。", final: false)
+        precondition(naturalEnd.count == 1 && naturalEnd[0].bodyCount == 74)
         var unpunctuated = SpeechSegmenter()
         let long = try unpunctuated.append(String(repeating: "甲", count: 117), final: true)
-        precondition(long.map(\.bodyCount) == [48, 48, 21])
+        precondition(long.map(\.bodyCount) == [117], "An unpunctuated final sentence must be submitted intact")
         var finalTail = SpeechSegmenter()
         _ = try finalTail.append("首句。", final: false)
         let merged = try finalTail.append(String(repeating: "乙", count: 20) + "，短尾。", final: true)
@@ -191,7 +195,7 @@ struct VoiceProtocolChecks {
             let text = String(repeating: "甲", count: 47) + dots + "乙。"
             let parts = try protected.append(text, final: true)
             precondition(parts.map(\.text).joined() == text)
-            precondition(parts.allSatisfy { !$0.text.hasSuffix(".") && !$0.text.hasSuffix("…") && $0.bodyCount <= 48 })
+            precondition(parts.count == 1 && parts[0].text == text)
             var splitDots = SpeechSegmenter()
             let awaiting = try splitDots.append(String(repeating: "甲", count: 47) + ".", final: false)
             precondition(awaiting.isEmpty)
@@ -201,25 +205,63 @@ struct VoiceProtocolChecks {
         var english = SpeechSegmenter()
         let sentence = try english.append("v1.2 example.test", final: false)
         precondition(sentence.isEmpty)
+        let englishSentence = "This deliberately long English sentence should remain complete even after the former limit."
+        var streamedEnglish = SpeechSegmenter()
+        let beforePeriodBoundary = try streamedEnglish.append(englishSentence, final: false)
+        precondition(beforePeriodBoundary.isEmpty)
+        let atPeriod = try streamedEnglish.append(" Another sentence follows.", final: true)
+        precondition(atPeriod.map(\.text) == [englishSentence, " Another sentence follows."])
+    }
+
+    private static func checkEnglishWordSegments() throws {
+        let samples = [
+            "This is an English sentence with a wonderful ending that must preserve every complete word.",
+            "Please keep this deliberately long sentence readable: don't split mother-in-law or café anywhere.",
+            String(repeating: "w", count: 80) + " is a single long word.",
+            "中文和English混排时，也不能拆开wonderful这个单词。"
+        ]
+        for provider: ConnectionProvider in [.elevenLabs, .miniMax, .fishAudio] {
+            for text in samples {
+                for incremental in [false, true] {
+                    var segmenter = SpeechSegmenter(provider: provider, model: "speech-02-hd")
+                    var parts: [SpeechSegment] = []
+                    if incremental {
+                        for character in text { parts += try segmenter.append(String(character), final: false) }
+                        parts += try segmenter.append("", final: true)
+                    } else { parts = try segmenter.append(text, final: true) }
+                    precondition(parts.map(\.text).joined() == text, "English streaming must preserve the original text")
+                    var offset = 0
+                    let characters = Array(text)
+                    for part in parts.dropLast() {
+                        offset += part.text.count
+                        let before = characters[offset - 1]
+                        let after = characters[offset]
+                        let wordCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'-’é"
+                        precondition(!(wordCharacters.contains(before) && wordCharacters.contains(after)),
+                                     "A synthesis request must never split an English word")
+                    }
+                }
+            }
+        }
     }
 
     private static func checkTagScope() throws {
         var scoped = SpeechSegmenter(tagsEnabled: true)
         let long = String(repeating: "甲", count: 49)
-        let values = try scoped.append("[whispers][sad]" + long + "。下一句。", final: true)
-        precondition(values[0].text == "[whispers][sad]" + String(repeating: "甲", count: 48))
-        precondition(values[1].text == "[whispers][sad]甲。")
+        let values = try scoped.append("[whispers][sad]" + long + "，续句。下一句。", final: true)
+        precondition(values[0].text == "[whispers][sad]" + long + "，")
+        precondition(values[1].text == "[whispers][sad]续句。")
         precondition(values[2].text == "下一句。", "expression must end with its sentence")
         var replacement = SpeechSegmenter(tagsEnabled: true)
         let prefix = try replacement.append("[whis", final: false)
         precondition(prefix.isEmpty)
-        let a = try replacement.append("pers][sad]" + long, final: false)
+        let a = try replacement.append("pers][sad]" + long + "，", final: false)
         precondition(a.count == 1)
         let b = try replacement.append("[angry]" + long + "。", final: true)
         precondition(b.last!.text.hasPrefix("[angry]"))
         precondition(!b.last!.text.contains("[whispers]") && !b.last!.text.contains("[sad]"))
         var events = SpeechSegmenter(tagsEnabled: true)
-        let once = try events.append("[sighs][unknown]" + long + "。", final: true)
+        let once = try events.append("[sighs][unknown]" + long + "，尾句。", final: true)
         precondition(once.map(\.text).joined().components(separatedBy: "[sighs]").count == 2)
         precondition(!once.last!.text.contains("[unknown]"))
     }
@@ -304,8 +346,8 @@ struct VoiceProtocolChecks {
         var capped = SpeechSegmenter(miniMax: true)
         let cappedPrefix = String(repeating: "字", count: 47)
         let cappedSegments = try capped.append(cappedPrefix + "<#0.3#>后文。", final: true)
-        precondition(cappedSegments.map(\.text) == [cappedPrefix + "<#0.3#>后", "文。"])
-        precondition(cappedSegments.map(\.bodyCount) == [48, 2])
+        precondition(cappedSegments.map(\.text) == [cappedPrefix + "<#0.3#>后文。"])
+        precondition(cappedSegments.map(\.bodyCount) == [50])
 
         var noPause = SpeechSegmenter(miniMax: true)
         let noPausePartial = try noPause.append("普通句。", final: false)

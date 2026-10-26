@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSSiriUsageDescription</key>
+	<string>用于让系统通讯录和 Siri 发起 Tincall 通话。</string>
 	<key>NSCameraUsageDescription</key>
 	<string>用于拍照后发送给通话对象</string>
 	<key>CFBundleURLTypes</key>
@@ -12,6 +14,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>tincall</string>
+				<string>tel</string>
 			</array>
 		</dict>
 	</array>
@@ -20,6 +23,16 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INStartCallIntent</string>
+		<string>INStartAudioCallIntent</string>
+	</array>
+	<key>INIntentsSupported</key>
+	<array>
+		<string>INStartCallIntent</string>
+		<string>INStartAudioCallIntent</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

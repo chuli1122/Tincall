@@ -12,7 +12,7 @@ struct SpeechSegment {
 }
 
 /// Accepts only new text. Final snapshots are reconciled by CallCoordinator.
-/// Only documented supplier markers are kept atomic across text deltas.
+/// Supplier markers and Latin words stay intact across text deltas.
 struct SpeechSegmenter {
     private struct Token {
         let raw: String
@@ -20,7 +20,6 @@ struct SpeechSegmenter {
         let pause: Bool
         let sentenceEnd: Bool
         let cue: String?
-        var protectedPoint = false
         var silence = false
         var speakable: Bool { cue == nil && !silence && raw.contains { $0.isLetter || $0.isNumber } }
     }
@@ -56,6 +55,10 @@ struct SpeechSegmenter {
         // markers remain literal, while a streaming marker waits for its end.
         guard let tokens = try? parser.tokenize(final: !isStreaming, forDisplay: true) else { return text }
         return presentationText(tokens)
+    }
+
+    private enum Interleaved {
+        static let message = "SATORTYLTLLNEAIEG"
     }
 
     /// Remove control-only lines and normalize ASCII spaces touching controls.
@@ -117,28 +120,16 @@ struct SpeechSegmenter {
             if miniMax { try validatePauses(tokens, final: final) }
             var count = 0
             var cut: Int?
-            var lastPause: Int?
             var scopedExpression = !expressionCues.isEmpty
             var closesExpression = false
             for (index, token) in tokens.enumerated() {
-                if count + token.bodyCount > 48 {
-                    // Never cut on a point/ellipsis token, including at the cap.
-                    cut = ([lastPause].compactMap { $0 } + Array((1...max(1, index)).reversed())).first {
-                        $0 > 0 && !tokens[$0 - 1].protectedPoint && safeBoundary($0, in: tokens, final: final)
-                    }
-                    if cut != nil { break }
-                }
                 if Self.isExpression(token.cue) { scopedExpression = true }
                 count += token.bodyCount
-                if token.pause { lastPause = index + 1 }
                 let firstBoundary = emittedCount == 0 &&
                     (token.sentenceEnd || (count >= 12 && "，,：:".contains(token.raw)))
                 let laterBoundary = emittedCount > 0 && count > 20 && token.pause
                 if count > 0, (firstBoundary || laterBoundary || (token.sentenceEnd && scopedExpression)), safeBoundary(index + 1, in: tokens, final: final) {
                     closesExpression = token.sentenceEnd && scopedExpression
-                    cut = index + 1; break
-                }
-                if count >= 48, !token.protectedPoint, safeBoundary(index + 1, in: tokens, final: final) {
                     cut = index + 1; break
                 }
             }
@@ -154,8 +145,8 @@ struct SpeechSegmenter {
             buffer.removeFirst(raw.count)
             sourceEnd += raw.unicodeScalars.count
             let bodyCount = chosen.reduce(0) { $0 + $1.bodyCount }
-            // A new adjacent group replaces the whole previous group. Only length
-            // splits inside the same sentence inherit it; events stay at source.
+            // A new adjacent group replaces the whole previous group. Segments
+            // inside the same sentence inherit it; events stay at source.
             let firstContent = chosen.first { !$0.raw.allSatisfy(\.isWhitespace) }
             let prefix = Self.isExpression(firstContent?.cue) ? "" : expressionCues.joined()
             var inGroup = false
@@ -222,6 +213,14 @@ struct SpeechSegmenter {
         return true
     }
 
+    private static func isWordCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { scalar in
+            (0x30...0x39).contains(scalar.value) ||
+            (scalar.properties.isAlphabetic && (scalar.value < 0x0250 || (0x1E00...0x1EFF).contains(scalar.value))) ||
+            CharacterSet.nonBaseCharacters.contains(scalar)
+        }
+    }
+
     private mutating func tokenize(final: Bool, forDisplay: Bool = false) throws -> [Token] {
         let chars = Array(buffer)
         var tokens: [Token] = []
@@ -272,8 +271,32 @@ struct SpeechSegmenter {
                 var end = index + 1
                 while end < chars.count, chars[end] == "." || chars[end] == "…" { end += 1 }
                 if end == chars.count, !final, !forDisplay { break }
+                let sentenceEnd = character == "." && end == index + 1 && index > 0 &&
+                    (end == chars.count || chars[end].isWhitespace)
                 tokens.append(Token(raw: String(chars[index..<end]), bodyCount: end - index,
-                                    pause: false, sentenceEnd: false, cue: nil, protectedPoint: true))
+                                    pause: sentenceEnd, sentenceEnd: sentenceEnd, cue: nil))
+                index = end
+                continue
+            }
+            if Self.isWordCharacter(character) {
+                var end = index + 1
+                while end < chars.count {
+                    if Self.isWordCharacter(chars[end]) { end += 1; continue }
+                    if "'’-".contains(chars[end]) {
+                        if end + 1 == chars.count, !final, !forDisplay { break }
+                        if end + 1 < chars.count, Self.isWordCharacter(chars[end + 1]) {
+                            end += 2
+                            continue
+                        }
+                    }
+                    break
+                }
+                // A delta ending in a word (or its apostrophe/hyphen) cannot
+                // establish a boundary until the following text arrives.
+                if !final, !forDisplay,
+                   end == chars.count || (end + 1 == chars.count && "'’-".contains(chars[end])) { break }
+                tokens.append(Token(raw: String(chars[index..<end]), bodyCount: end - index,
+                                    pause: false, sentenceEnd: false, cue: nil))
                 index = end
                 continue
             }

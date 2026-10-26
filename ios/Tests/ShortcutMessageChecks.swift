@@ -110,6 +110,8 @@ private final class ShortcutConnectorProtocol: URLProtocol, @unchecked Sendable 
             endpoint: URL(string: "https://shortcut-fixture.invalid"), model: "fixture")
         let connector = ConnectionProfile(name: "Fixture connector", provider: .genericConnector,
             endpoint: URL(string: "https://shortcut-fixture.invalid"))
+        for connection in [model, connector] { DataSharingConsent.setAllowed(true, for: connection) }
+        defer { for connection in [model, connector] { DataSharingConsent.setAllowed(false, for: connection) } }
         for connection in [model, connector] { try credentials.write("synthetic-shortcut-token", connectionID: connection.id) }
         defer { for connection in [model, connector] { try? credentials.delete(connectionID: connection.id) } }
         func coordinator() -> CallCoordinator {

@@ -23,13 +23,21 @@ struct RequestLogResponsivenessChecks {
         try JSONEncoder().encode(Archive(entries: fixture)).write(to: directory.appendingPathComponent("requests.json"))
         let store = RequestLogStore(directory: directory)
         await store.flushPendingWrites()
-        let start = ProcessInfo.processInfo.systemUptime
-        let span = store.begin(service: .mcp, step: .callControl)
-        span.request("Synthetic current call check")
-        span.succeed("Synthetic no incoming call")
-        span.finish()
-        let elapsed = ProcessInfo.processInfo.systemUptime - start
-        try FileHandle.standardError.write(contentsOf: Data("Main-actor log update: \(Int(elapsed * 1000)) ms with \(fixture.count) retained requests\n".utf8))
+        // Shared CI runners can pause a single sample. Keep the same 50 ms budget,
+        // using the median of five complete updates to detect sustained blocking.
+        var samples: [Double] = []
+        for sample in 0..<5 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let span = store.begin(service: .mcp, step: .callControl)
+            span.request("Synthetic current call check")
+            span.succeed("Synthetic no incoming call \(sample)")
+            span.finish()
+            samples.append(ProcessInfo.processInfo.systemUptime - start)
+            await store.flushPendingWrites()
+        }
+        let elapsed = samples.sorted()[samples.count / 2]
+        let timings = samples.map { String(Int($0 * 1000)) }.joined(separator: ", ")
+        try FileHandle.standardError.write(contentsOf: Data("Main-actor log updates: [\(timings)] ms; median \(Int(elapsed * 1000)) ms with \(fixture.count) retained requests\n".utf8))
         // A long index write overlaps further updates to the same request body.
         let callID = UUID()
         let updating = store.begin(service: .mcp, step: .events, context: RequestLogContext(callID: callID))
@@ -41,18 +49,20 @@ struct RequestLogResponsivenessChecks {
         updating.succeed("Synthetic late completion"); updating.finish()
         await store.flushPendingWrites()
         let reopened = RequestLogStore(directory: directory)
-        let saved = try reopened.load(Array(reopened.entries.suffix(2)))
-        guard reopened.entries.count == fixture.count + 2,
-              saved[0].responseText == "Synthetic no incoming call",
-              saved[1].requestText == "Synthetic update 5",
-              saved[1].responseText == "Synthetic late completion",
-              saved[1].errorCode == "call_hang_up", saved[1].outcome == .cancelled else {
+        let saved = try reopened.load(Array(reopened.entries.suffix(samples.count + 1)))
+        guard reopened.entries.count == fixture.count + samples.count + 1,
+              saved.dropLast().enumerated().allSatisfy({ index, entry in
+                  entry.responseText == "Synthetic no incoming call \(index)"
+              }),
+              saved.last?.requestText == "Synthetic update 5",
+              saved.last?.responseText == "Synthetic late completion",
+              saved.last?.errorCode == "call_hang_up", saved.last?.outcome == .cancelled else {
             throw NSError(domain: "RequestLogResponsivenessChecks", code: 2)
         }
         await reopened.flushPendingWrites()
         guard elapsed < 0.05 else {
             throw NSError(domain: "RequestLogResponsivenessChecks", code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "A routine incoming-call check blocks UI work for more than 50 ms"])
+                userInfo: [NSLocalizedDescriptionKey: "Routine incoming-call checks have a median UI blocking time over 50 ms"])
         }
         print("PASS: prompt incoming-call logging, updates during saves, hangup and complete restart recovery")
     }

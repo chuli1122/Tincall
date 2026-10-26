@@ -97,13 +97,13 @@ struct MCPOAuthAuthorizationSettings: View {
             Section {
                 Text("只输入你自己刚在浏览器里看到的授权码。别人发给你的码不要输入，也不要替别人批准授权。")
                     .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
-                Text("在 ChatGPT 添加 MCP 服务时选择 OAuth，将授权页显示的一次性授权码填在这里。")
+                Text("在 ChatGPT 或 Claude 添加 MCP 服务时选择 OAuth，将授权页显示的一次性授权码填在这里。")
                     .font(.footnote).foregroundStyle(.secondary)
                 TextField("一次性授权码", text: $code)
                     .textInputAutocapitalization(.characters).autocorrectionDisabled()
                     .disabled(isWorking || request != nil || decision != nil)
                 if let decision {
-                    Text(decision.approved ? String(localized: "已授权。回到原授权页面刷新，继续连接 ChatGPT。") : String(localized: "已拒绝此次授权。"))
+                    Text(decision.approved ? String(localized: "已授权。回到原授权页面刷新，继续连接。") : String(localized: "已拒绝此次授权。"))
                     Link("返回授权页", destination: decision.continuation_url)
                 } else if let request {
                     if let date = request.requestedAt {
@@ -114,7 +114,7 @@ struct MCPOAuthAuthorizationSettings: View {
                         Text("请选择").tag(nil as String?)
                         ForEach(request.contacts) { Text($0.display_name).tag(Optional($0.id)) }
                     }
-                    Text("ChatGPT 可以查看这位联系人的通话文字、发送回复及发起或结束通话。它不能访问其他联系人或云端备份。仅确认你刚刚在 ChatGPT 发起的授权。")
+                    Text("这个 MCP 客户端可以查看这位联系人的通话文字、发送回复及发起或结束通话。它不能访问其他联系人或云端备份。仅确认你刚刚发起的授权。")
                         .font(.footnote).foregroundStyle(.secondary)
                     if request.contacts.isEmpty {
                         Text("此服务还没有 MCP 联系人，请先在联系人设置中选择 MCP 模式并保存。")
@@ -132,7 +132,7 @@ struct MCPOAuthAuthorizationSettings: View {
                 SettingsSectionHeading(title: String(localized: "授权连接"), caption: "OAUTH")
             }
         }
-        .modifier(SettingsPageStyle(title: String(localized: "ChatGPT 授权"), subtitle: connection.name, symbol: "key", index: "MCP OAUTH", dismissDisabled: isWorking))
+        .modifier(SettingsPageStyle(title: String(localized: "MCP OAuth 授权"), subtitle: connection.name, symbol: "key", index: "MCP OAUTH", dismissDisabled: isWorking))
     }
 
     private func lookup() {
@@ -160,7 +160,7 @@ struct MCPOAuthAuthorizationSettings: View {
     private func authorizationIssue(_ error: Error) -> String {
         if let failure = error as? ExternalCallFailure {
             if failure.status == 404 { return String(localized: "云端尚未支持 OAuth，请先用此版本 App 更新一键部署。") }
-            if failure.status == 410 { return String(localized: "授权码已失效或已处理，请在 ChatGPT 重新发起连接。") }
+            if failure.status == 410 { return String(localized: "授权码已失效或已处理，请重新发起 MCP OAuth 连接。") }
             if failure.status == 401 || failure.status == 403 { return String(localized: "无法授权，请检查此连接的手机访问令牌。") }
         }
         return (error as? TincallError)?.message ?? String(localized: "暂时无法处理授权，请检查授权码和连接后重试。")

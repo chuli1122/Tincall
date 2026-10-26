@@ -51,6 +51,8 @@ private final class ScheduleProtocol: URLProtocol, @unchecked Sendable {
     @MainActor static func main() async throws {
         let credentials = CredentialStore()
         let connection = ConnectionProfile(name: "Synthetic schedule", provider: .genericConnector, endpoint: URL(string: "https://schedule.invalid"))
+        DataSharingConsent.setAllowed(true, for: connection)
+        defer { DataSharingConsent.setAllowed(false, for: connection) }
         try credentials.write("synthetic-fixture-only", connectionID: connection.id)
         defer { try? credentials.delete(connectionID: connection.id) }
         let config = URLSessionConfiguration.ephemeral

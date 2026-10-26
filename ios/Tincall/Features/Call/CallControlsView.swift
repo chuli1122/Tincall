@@ -32,7 +32,7 @@ struct CallRoundButton: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 8) {
+            VStack(spacing: 7) {
                 Image(systemName: systemImage)
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(palette.primaryText)

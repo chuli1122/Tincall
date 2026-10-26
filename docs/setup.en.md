@@ -17,9 +17,9 @@ Tincall requires an iPhone running iOS 26 or later. The source edition does not 
 
 Download `*-selfsign-unsigned.ipa` from Assets on the [latest release page](https://github.com/chuli1122/Tincall/releases/latest), then re-sign and install it using your own signing method. An IPA does not authorize arbitrary devices to install it. Re-signing normally avoids recompiling, but the signing tool must correctly handle:
 
-- The main app, embedded frameworks and Live Activity extension, with matching profiles and entitlements.
-- Unique bundle IDs. The extension ID must start with the main app ID followed by a dot, for example `com.yourname.tincall.CallWidget`.
-- The same authorized App Group in both targets, their signing entitlements, and the main app's **resolved** `Info.plist` field `TincallAppGroupIdentifier`. Changing an xcconfig cannot change an already compiled IPA.
+- The main app, embedded frameworks, Live Activity extension and Call Intents extension, with matching profiles and entitlements. The main app requires its Siri and calling-app capabilities as well as any enabled push capability.
+- Unique bundle IDs for `Tincall`, `TincallCallWidget` and `TincallCallIntents`. Each extension ID must start with the main app ID followed by a dot, for example `com.yourname.tincall.CallWidget` and `com.yourname.tincall.callintents`.
+- The same authorized App Group in the main app and widget, their signing entitlements, and both packages' **resolved** `Info.plist` field `TincallAppGroupIdentifier`. The Call Intents extension does not use this group. Changing an xcconfig cannot change an already compiled IPA.
 - `aps-environment` authorized by the main app's profile, if you need background calls.
 
 If your tool cannot preserve these settings, build from source. A free Personal Team cannot provide the APNs capabilities needed for background calls. Do not assume deleting App Group entitlements preserves widgets and shared state. Signing duration and supported capabilities depend on your account and tool.
@@ -29,8 +29,8 @@ For updates, keep the same signing identity, bundle IDs and shared group; back u
 ## Build from source
 
 1. On a Mac, install Xcode with the iOS 26 SDK or later and support for your device's current OS. Open `ios/Tincall.xcodeproj` and select the **Tincall** scheme. The App Store scheme has a separate trial/purchase flow.
-2. For both `Tincall` and `TincallCallWidget`, choose your Team and unique bundle IDs in Signing & Capabilities. Check Debug and Release. Do not override both targets with one global `PRODUCT_BUNDLE_IDENTIFIER` command argument.
-3. Set your shared group in `ios/TincallCallWidget/CallActivityAppGroup.xcconfig`, under `TINCALL_APP_GROUP_IDENTIFIER`. All three entitlements files reference this variable. Authorize the same group for both app IDs; the app reads it through `TincallAppGroupIdentifier` in Info.plist.
+2. For all three targets—`Tincall`, `TincallCallWidget` and `TincallCallIntents`—choose your Team and unique bundle IDs in Signing & Capabilities. Check the configurations you will build and keep their version/build numbers aligned. Do not override all targets with one global `PRODUCT_BUNDLE_IDENTIFIER` command argument.
+3. Set your shared group in `ios/TincallCallWidget/CallActivityAppGroup.xcconfig`, under `TINCALL_APP_GROUP_IDENTIFIER`. The main app and widget entitlements reference this variable. Authorize the same group for those two app IDs and retain the resolved `TincallAppGroupIdentifier` in both packages. The Call Intents extension has no separate entitlements file and does not use the group.
 4. The shared configuration enables push by default: development for Debug, production for Release. A team without push must locally set `TINCALL_PUSH_ENTITLEMENTS` to `Tincall/Resources/Tincall.entitlements` and ensure the final signature has no `aps-environment`. Do not enable background calls in this case. App Group support must also be checked separately.
 5. Connect and trust your iPhone, enable Developer Mode, select it in Xcode and Run. Complete any device trust prompts. Configure your own services in the app.
 
@@ -100,7 +100,13 @@ Local backup folders contain contacts, connection settings, pictures, text, summ
 
 For Standard MCP, save a contact using MCP mode and your service. Copy its MCP URL and Authorization header into the external AI platform. HTTP uses `/mcp`; legacy SSE uses `/mcp/sse` and needs reconnect/Last-Event-ID support. A normal model API endpoint is not a Tincall backend or MCP service.
 
-The AI submits each complete reply with `tincall_reply({call, text})`. Copy the 8-character `call` marker returned with the input for that task, and use the same marker for `tincall_end({call})` and `tincall_wait({call})`. No UUID, epoch or cursor is required. Never substitute a newer marker to retry an old reply or hang-up. Refresh the platform's tool definitions after updating the service and migrations. Default calls can wait up to 120 seconds for the next event; set the platform's request timeout to 180 seconds and reconnect. Continue waiting after a normal timeout. This is a per-request limit, not a two-minute call limit. A timeout does not prove a reply was not sent, so do not blindly resend it.
+The AI submits each complete reply with `tincall_reply({call, text})`. Copy the 8-character `call` marker returned with the input for that task, and use the same marker for `tincall_end({call})` and `tincall_wait({call})`. No UUID, epoch or cursor is required. Never substitute a newer marker to retry an old reply or hang-up. Refresh the platform's tool definitions after updating the service and migrations. The contact's MCP wait duration defaults to 120 seconds and accepts 1–130 seconds; out-of-range entries in the app are adjusted automatically. Set the platform's tool timeout longer than that wait, allowing time to return the result. Continue waiting after a normal timeout; it does not end the call or prove that a reply was not sent, so do not blindly resend it.
+
+Messages arrive as XML, for example `<message name="Alex" timestamp="2026-10-26 18:30:00"><text>Hello.</text></message>`. A blank name is omitted. Time awareness adds the phone's local timestamp to incoming messages. Native MCP image blocks follow their message directly.
+
+Kelivo defaults to a 30-second MCP request timeout: change it to 180 seconds, reconnect Tincall and keep Kelivo in the foreground throughout the call.
+
+Muse waits 45 seconds for tool results by default and moves the tool invocation to the background at 120 seconds. For Muse, set the Tincall contact's MCP wait to 90 seconds and ask the AI in Muse to set its tool wait to 110 seconds. Tincall can then return first; if it does not, Muse can report its timeout before moving the invocation to the background.
 
 ### MCP with a wake bridge
 
@@ -184,13 +190,13 @@ App updates do not update your deployed connector. Use the original deployment p
 - A CLI-deployed Supabase installation: obtain updated source and rerun the original deployment command with the same private settings. It applies migrations and updates the function; do not generate replacement phone/worker tokens.
 - Node/Docker: rerun the original installer using updated source and the existing private configuration/data paths. Do not delete the database to update the program.
 
-Image/storage migrations are included; no extra manual image SQL is needed. Refresh or reconnect the external AI client's MCP tools after a service upgrade, and check that `tincall_reply` requires only `text` with optional `wait_for_input`.
+Image/storage and MCP wait-preference migrations are included; no extra manual image SQL is needed. In Tincall Cloud, refresh the service version after upgrading. The connector reports `server_version` separately from its protocol `version`; a missing or older service revision prompts an update, while a failed check requires checking the connection or token. Refresh or reconnect the external AI client's MCP tools: ordinary `tincall_reply` requires `call` and `text`, with optional `wait_for_input`; wake-bridge replies require only `text`.
 
 | Symptom | Check first |
 | --- | --- |
 | 401 from the phone | Connector URL, phone token and owner mapping; never disable authorization rules to bypass it |
 | Missing service capability | Update through the original deployment path, then check the connection again |
-| MCP timeout or old parameters | Set 180-second client timeout; refresh tools and remove obsolete fields; do not resend blindly |
+| MCP timeout or old parameters | Follow the Kelivo/Muse settings above or your platform's limits; refresh tools and remove obsolete fields; do not resend blindly |
 | No push entitlement | Actual main app profile/signature; a cloud deployment cannot add device signing capabilities |
 | Sender 401 | Matching connector-to-sender service token |
 | `apns_configuration_missing` / `apns_configuration_invalid` | Team, key, full PEM, configured environment and `.voip` topic |

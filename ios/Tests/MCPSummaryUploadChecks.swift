@@ -72,6 +72,8 @@ struct MCPSummaryUploadChecks {
         let credentials = CredentialStore()
         let connection = restart?.connection ?? ConnectionProfile(name: "Summary fixture", provider: .genericConnector,
             endpoint: URL(string: "https://summary-fixture.invalid/tincall"))
+        DataSharingConsent.setAllowed(true, for: connection)
+        defer { DataSharingConsent.setAllowed(false, for: connection) }
         try credentials.write("synthetic-summary-token", connectionID: connection.id)
         defer { try? credentials.delete(connectionID: connection.id) }
         let configuration = URLSessionConfiguration.ephemeral

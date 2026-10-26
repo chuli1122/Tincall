@@ -1,6 +1,12 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "NSSiriUsageDescription" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow system Contacts and Siri to start Tincall calls." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用于让系统通讯录和 Siri 发起 Tincall 通话。" } }
+      }
+    },
     "CFBundleDisplayName" : {
       "comment" : "Bundle display name",
       "extractionState" : "extracted_with_value",
@@ -48,13 +54,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sync only the names and photos of system contacts you choose."
+            "value" : "Read contacts you choose and add dedicated Tincall call numbers while keeping existing numbers."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "仅同步你选择的系统联系人的姓名与头像。"
+            "value" : "读取你选择的联系人资料，并添加 Tincall 专用通话号码，保留原有号码。"
           }
         }
       }

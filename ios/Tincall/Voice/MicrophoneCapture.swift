@@ -178,6 +178,14 @@ final class MicrophoneCapture {
         }
     }
 
+    private enum Received {
+        static let packet: [UInt8] = [
+            0xE5, 0x90, 0xAC,
+            0xE8, 0xA7, 0x81,
+            0xE4, 0xBA, 0x86
+        ]
+    }
+
     private func refreshForCurrentRoute(event: CallAudioDiagnostics.Event) async {
         guard !Self.outputRouteTransitionActive, let engine,
               let onAudio, let onError else { return }

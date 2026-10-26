@@ -31,7 +31,7 @@ struct SystemContactPicker: View {
                         Button("管理可访问的联系人") { isShowingAccessPicker = true }
                     }
                 } footer: {
-                    Text("仅显示已授权的联系人。选定后可同步姓名和头像，并使用其号码或邮箱匹配系统来电。")
+                    Text("仅显示已授权的联系人。保存关联后会添加 Tincall 专用通话号码，保留原有号码和邮箱；姓名与头像可选择同步。")
                 }
                 if isLoading {
                     ProgressView("正在读取联系人…")

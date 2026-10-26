@@ -36,27 +36,47 @@ xcodebuild -project "$task_root/ios/Tincall.xcodeproj" \
     }
 
 task_app="$task_output/Tincall.xcarchive/Products/Applications/Tincall.app"
+# Xcode leaves linker ad-hoc signatures on some frameworks; they carry no identity
+# and are replaced when the recipient re-signs, so strip them before checking.
+find "$task_app" \( -name '*.framework' -o -name '*.dylib' -o -name '*.appex' \) -print0 |
+    while IFS= read -r -d '' task_bundle; do
+        codesign --remove-signature "$task_bundle" 2>/dev/null || true
+    done
+codesign --remove-signature "$task_app" 2>/dev/null || true
 task_name=$(python3 - "$task_app" <<'PY'
 from pathlib import Path
 import plistlib
 import re
+import subprocess
 import sys
 app = Path(sys.argv[1])
 def info(path):
     with path.open('rb') as stream:
         return plistlib.load(stream)
 main = info(app / 'Info.plist')
-widget = info(app / 'PlugIns/TincallCallWidget.appex/Info.plist')
+extensions = sorted(app.rglob('*.appex'))
+expected = {'TincallCallWidget.appex', 'TincallCallIntents.appex'}
+missing = expected - {extension.name for extension in extensions}
+if missing:
+    raise SystemExit('Missing required app extension: ' + ', '.join(sorted(missing)))
 for key in ('CFBundleShortVersionString', 'CFBundleVersion'):
-    if main[key] != widget[key] or not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', main[key]):
-        raise SystemExit('App and extension must have the same numeric version and build.')
+    if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)*', main[key]):
+        raise SystemExit('App version and build must be numeric.')
+    for extension in extensions:
+        if info(extension / 'Info.plist')[key] != main[key]:
+            raise SystemExit(f'App and {extension.name} must have the same {key}.')
 for name in ('LAME-LICENSE.txt', 'ONNXRuntime-LICENSE.txt',
              'ONNXRuntime-ThirdPartyNotices.txt', 'SileroVAD-LICENSE.txt',
              'Frameworks/LAME.framework/LAME'):
     if not (app / name).is_file():
         raise SystemExit('Missing packaged library or notice: ' + name)
-if (app / 'embedded.mobileprovision').exists():
-    raise SystemExit('An unsigned public IPA must not contain a developer profile.')
+for path in app.rglob('*'):
+    if path.name == '_CodeSignature' or path.suffix == '.mobileprovision':
+        raise SystemExit('An unsigned public IPA must not contain signatures or profiles: ' + str(path))
+for bundle in [app, *extensions, *app.rglob('*.framework'), *app.rglob('*.dylib')]:
+    if subprocess.run(['codesign', '-d', str(bundle)], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode == 0:
+        raise SystemExit('An unsigned public IPA must not contain signed code: ' + str(bundle))
 print('Tincall-' + main['CFBundleShortVersionString'] + '-build' + main['CFBundleVersion'])
 PY
 )
@@ -75,7 +95,7 @@ Product: $task_name
 Edition: source / personal self-signing (no StoreKit call gate)
 Scheme: Tincall
 Configuration: Release
-Signing: disabled; the recipient must re-sign the app, extension and frameworks
+Signing: disabled; the recipient must re-sign the app, both extensions and frameworks
 Source: distribute the reviewed source snapshot from this same build with the IPA
 Libraries: LAME 3.100 (dynamic), ONNX Runtime 1.24.2, bundled Silero VAD
 Library materials: LibraryMaterials/ (include the entire directory with the IPA)

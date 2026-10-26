@@ -44,7 +44,9 @@ final class SpeechConnectionProbe {
                     let configuration: SpeechSynthesisConfiguration
                     switch connection.provider {
                     case .elevenLabs:
-                        configuration = .elevenLabs(.init(elevenLabsAPIKey: key, elevenLabsVoiceID: voice, elevenLabsModel: model))
+                        configuration = .elevenLabs(.init(elevenLabsAPIKey: key, elevenLabsVoiceID: voice, elevenLabsModel: model,
+                            stability: connection.elevenLabsStability,
+                            similarityBoost: connection.elevenLabsSimilarityBoost))
                     case .miniMax:
                         let host = connection.region == "international" ? "api.minimax.io" : "api.minimaxi.com"
                         configuration = .miniMax(.init(apiKey: key, model: model, voiceID: voice,

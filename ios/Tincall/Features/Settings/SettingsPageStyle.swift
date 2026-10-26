@@ -263,11 +263,17 @@ struct SettingsSectionHeading: View {
 
 struct SettingsField<Content: View>: View {
     let title: String
+    var help: LocalizedStringResource? = nil
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text(title).font(.caption).foregroundStyle(.secondary)
+                if let help {
+                    DeploymentHelpButton(title: "\(title)说明", detail: help, systemImage: "info.circle")
+                }
+            }
             content
                 .font(.subheadline)
                 .accessibilityLabel(title)
@@ -330,20 +336,26 @@ struct SettingsCredentialField: View {
     var field: CredentialField = .apiKey
     @Binding var text: String
     var isReadOnly = false
+    var help: LocalizedStringResource? = nil
     @State private var prompt = String(localized: "正在读取保存状态…")
 
     var body: some View {
         Group {
             if isReadOnly {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(title).font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(title).font(.caption).foregroundStyle(.secondary)
+                        if let help {
+                            DeploymentHelpButton(title: "\(title)说明", detail: help, systemImage: "info.circle")
+                        }
+                    }
                     input.font(.subheadline)
                 }
                 .padding(.vertical, 5)
                 .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 .listRowSeparator(.hidden)
             } else {
-                SettingsField(title: title) { input }
+                SettingsField(title: title, help: help) { input }
             }
         }
         .task(id: connectionID) {

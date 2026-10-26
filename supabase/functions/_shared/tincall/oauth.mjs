@@ -25,10 +25,12 @@ async function body(request,json=false){
 }
 function callback(uri){
   let url;try{url=new URL(uri);}catch{throw new OAuthError('invalid_redirect_uri');}
-  // This onboarding is specifically for ChatGPT. Exact registered redirects
-  // are checked again before authorization and exchange; no arbitrary callback.
-  check(url.origin==='https://chatgpt.com' && !url.username && !url.password && !url.search && !url.hash &&
-    (url.pathname==='/connector_platform_oauth_redirect' || /^\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(url.pathname)),'invalid_redirect_uri');
+  // Exact platform redirects are checked again before authorization and
+  // exchange; do not accept arbitrary callback URLs.
+  const chatGPT=url.origin==='https://chatgpt.com' &&
+    (url.pathname==='/connector_platform_oauth_redirect' || /^\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(url.pathname));
+  const claude=url.origin==='https://claude.ai' && url.pathname==='/api/mcp/auth_callback';
+  check(!url.username && !url.password && !url.search && !url.hash && (chatGPT || claude),'invalid_redirect_uri');
   return uri;
 }
 export function createMCPOAuth({store,baseURL}) {
@@ -59,7 +61,7 @@ export function createMCPOAuth({store,baseURL}) {
       check(p.token_endpoint_auth_method===undefined || p.token_endpoint_auth_method==='none','invalid_client_metadata');
       check(p.grant_types===undefined || (Array.isArray(p.grant_types) && p.grant_types.every(v=>['authorization_code','refresh_token'].includes(v))),'invalid_client_metadata');
       check(p.response_types===undefined || (Array.isArray(p.response_types) && p.response_types.every(v=>v==='code')),'invalid_client_metadata');
-      const client={client_id:opaque('tcc_'),client_name:typeof p.client_name==='string'?p.client_name.slice(0,100):'ChatGPT',redirect_uris:[...new Set(p.redirect_uris)]};
+      const client={client_id:opaque('tcc_'),client_name:typeof p.client_name==='string'?p.client_name.slice(0,100):'MCP client',redirect_uris:[...new Set(p.redirect_uris)]};
       await store.oauthCommand('client.create',client);
       return response({...client,token_endpoint_auth_method:'none',grant_types:['authorization_code','refresh_token'],response_types:['code']},201);
     }
@@ -79,7 +81,7 @@ export function createMCPOAuth({store,baseURL}) {
       if(pending.denied)return authorizationResponse(pending,'access_denied');
       if(pending.code)return authorizationResponse(pending);
       const code=pending.user_code.slice(0,4)+'-'+pending.user_code.slice(4);
-      return new Response(`Tincall · 授权 ChatGPT\n\n一次性授权码：${code}\n\n1. 打开 Tincall，在设置中打开这条云端连接。\n2. 进入「ChatGPT 授权」，输入上面的授权码。\n3. 选择允许访问的联系人，确认授权。\n4. 回到本页面刷新，继续连接 ChatGPT。\n\n授权码 10 分钟内有效。只授权你刚刚发起的连接。不要输入别人发给你的授权码，也不要替别人批准授权。\n\nOpen this cloud connection in Tincall settings → ChatGPT authorization. Enter ${code}, choose a contact and approve, then refresh this page. Expires in 10 minutes. Never enter a code sent by someone else or approve a connection on their behalf.`,{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'}});
+      return new Response(`Tincall · MCP OAuth 授权\n\n一次性授权码：${code}\n\n1. 打开 Tincall，在设置中打开这条云端连接。\n2. 进入「MCP OAuth 授权」，输入上面的授权码。\n3. 选择允许访问的联系人，确认授权。\n4. 回到本页面刷新，继续连接。\n\n授权码 10 分钟内有效。只授权你刚刚发起的连接。不要输入别人发给你的授权码，也不要替别人批准授权。\n\nOpen this cloud connection in Tincall settings and choose “MCP OAuth authorization”. Enter ${code}, choose a contact and approve, then refresh this page. Expires in 10 minutes. Never enter a code sent by someone else or approve authorization on their behalf.`,{headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff'}});
     }
     if(path==='/oauth/revoke'){
       check(request.method==='POST','invalid_request',405);const p=await body(request);
@@ -111,7 +113,10 @@ export function createMCPOAuth({store,baseURL}) {
     const p=await body(request,true);const code=normalizeCode(p.user_code);check(/^[A-HJ-NP-Z2-9]{8}$/.test(code));
     const pending=await store.oauthCommand('request.get',{user_code:code});check(pending && !pending.code && !pending.denied,'expired_request',410);
     const {bindings}=await store.mcpRoleCommand(principal.owner_id,'list');
-    if(path.endsWith('/lookup'))return response({user_code:code,client_name:'ChatGPT',requested_at:new Date(Date.parse(pending.expires_at)-600000).toISOString(),contacts:bindings.map(b=>({contact_id:b.contact_id,display_name:b.display_name}))});
+    if(path.endsWith('/lookup')){
+      const client=await store.oauthCommand('client.get',{client_id:pending.client_id});
+      return response({user_code:code,client_name:client?.client_name || 'MCP client',requested_at:new Date(Date.parse(pending.expires_at)-600000).toISOString(),contacts:bindings.map(b=>({contact_id:b.contact_id,display_name:b.display_name}))});
+    }
     check(['approve','deny'].includes(p.decision));
     if(p.decision==='approve')check(bindings.some(b=>b.contact_id===p.contact_id),'invalid_contact');
     const decided=await store.oauthCommand('request.decide',{user_code:code,owner_id:principal.owner_id,contact_id:p.decision==='approve'?p.contact_id:null,denied:p.decision==='deny',code:opaque('tcoc_')});

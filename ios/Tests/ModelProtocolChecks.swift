@@ -131,6 +131,15 @@ struct ModelProtocolChecks {
         precondition(restored.timeAwarenessEnabled == true)
         let legacy = try JSONDecoder().decode(CallRole.self, from: Data("{\"id\":\"00000000-0000-0000-0000-000000000001\",\"name\":\"Legacy\",\"systemPrompt\":\"\",\"voiceID\":\"\"}".utf8))
         precondition(legacy.timeAwarenessEnabled == nil)
+        precondition(legacy.mcpWaitTimeoutSeconds == nil && legacy.effectiveMCPWaitTimeoutSeconds == 120)
+        role.mcpWaitTimeoutSeconds = 0
+        precondition(role.effectiveMCPWaitTimeoutSeconds == 1)
+        role.mcpWaitTimeoutSeconds = 131
+        precondition(role.effectiveMCPWaitTimeoutSeconds == 130)
+        precondition(CallContextBuilder.timeAwareInput(user.text, createdAt: user.createdAt,
+            timeZone: TimeZone(identifier: "Asia/Shanghai")!) == "[1970-01-01 08:00:00]\n" + user.text)
+        precondition(CallContextBuilder.timeAwareInput(user.text, createdAt: user.createdAt,
+            timeZone: TimeZone(identifier: "America/New_York")!) == "[1969-12-31 19:00:00]\n" + user.text)
         for stamp in ["[2026-10-19 08:01]", "[2026.10.19 8:01:02]"] {
             let raw = stamp + "\nHello\n" + stamp + " World at 12:30, on 2026-10-19."
             let expected = "Hello\nWorld at 12:30, on 2026-10-19."
@@ -415,7 +424,8 @@ struct ModelProtocolChecks {
             precondition(Data(preview.requestJSON.utf8) == wire && preview.characterCount == context.characterCount)
         }
         let empty = try CallContextBuilder.build(role: CallRole(name: "Test Contact"), historyRecords: [], currentMessages: [input])
-        precondition(empty.messages.count == 2 && empty.messages[0].content.contains("用户"))
+        precondition(empty.messages.count == 2 && !empty.messages[0].content.contains("user 是"))
+        precondition(empty.messages[0].content.contains("assistant 是「Test Contact」"))
         precondition(!empty.messages.contains { $0.content.contains("<conversation_settings>") || $0.content.contains("<tts_instructions>") })
         var limited = role
         limited.contextCharacterBudget = 1_000

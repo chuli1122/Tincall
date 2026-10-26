@@ -5,20 +5,21 @@ import {ConnectorError, ensure, uuid, object, json, integer, publicCall, readJSO
 
 const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26'];
 // Leave response headroom below Supabase's 150-second request idle timeout.
-const MCP_WAIT_MAX_SECONDS = 120;
+const MCP_WAIT_MAX_SECONDS = 130;
+const MCP_WAIT_DEFAULT_SECONDS = 120;
 const MCP_WAIT_POLL_MS = 1000;
 
-function waitTimeout(value = MCP_WAIT_MAX_SECONDS) {
+function waitTimeout(value = MCP_WAIT_DEFAULT_SECONDS) {
   integer(value, 'timeout_seconds');
   ensure(value >= 1 && value <= MCP_WAIT_MAX_SECONDS, 'invalid_timeout_seconds');
   return value;
 }
 const waitProperties = {
   cursor:{type:'object',properties:{sequence:{type:'integer',minimum:0},epoch:{type:'integer',minimum:0}},required:['sequence','epoch'],additionalProperties:false},
-  timeout_seconds:{type:'integer',minimum:1,maximum:MCP_WAIT_MAX_SECONDS,default:MCP_WAIT_MAX_SECONDS},
+  timeout_seconds:{type:'integer',minimum:1,maximum:MCP_WAIT_MAX_SECONDS,default:MCP_WAIT_DEFAULT_SECONDS},
 };
 const toolDefinitions = [
-  ['tincall_call', 'Call the linked phone and wait for the person to answer. When answered, speak by calling tincall_reply with your complete text. If nobody answers within two minutes, call tincall_wait to keep waiting.', {contact_id:{type:'string'},timeout_seconds:waitProperties.timeout_seconds}, ['contact_id']],
+  ['tincall_call', 'Call the linked phone and wait for the person to answer. When answered, speak by calling tincall_reply with your complete text. If the wait times out, call tincall_wait to keep waiting.', {contact_id:{type:'string'},timeout_seconds:waitProperties.timeout_seconds}, ['contact_id']],
   ['tincall_get_call', 'Read saved conversation history and current call state using the 8-character call ID, or omit it to find the current call. An ended call may also have a summary. For live conversation use tincall_wait; after a timeout keep waiting. History is paged, newest page first.', {call_id:{type:'string',description:'8-character call ID from a call result or history list.'},limit:{type:'integer',minimum:1,maximum:100,default:50},before_sequence:{type:'integer',minimum:1}}, []],
   ['tincall_wait', 'Wait for the next message, phone answer or hangup. Reuse the short call marker for this task; omit call only to discover a new call. After a timeout keep waiting.', {call:{type:'string',minLength:8,maxLength:8},timeout_seconds:waitProperties.timeout_seconds}, []],
   ['tincall_reply', 'Speak your complete reply, then wait for the next input by default. Omit wait_for_input; set it to false only to return immediately, such as before tincall_end. Reuse the 8-character call marker returned when this call was opened or discovered. Later messages do not repeat it. Never substitute a new call marker to retry an old reply or hangup.', {call:{type:'string',minLength:8,maxLength:8},text:{type:'string'},wait_for_input:{type:'boolean',default:true,description:'Omit to wait for the next input. Set false only to return immediately.'},timeout_seconds:waitProperties.timeout_seconds}, ['call','text']],
@@ -35,7 +36,12 @@ export function callReference(id) {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_');
 }
 // Owns reply targets, long waits, and both MCP transports, including wake subscriptions.
-export function createMCP({store, command, ensureOpening, schedule, mcpContent}) {
+export function createMCP({store, command, bindingFor, ensureOpening, schedule, mcpContent}) {
+  async function callWaitTimeout(principal, args, call) {
+    if (args.timeout_seconds !== undefined) return waitTimeout(args.timeout_seconds);
+    const binding = await bindingFor(principal.owner_id, call.contact_id);
+    return waitTimeout(binding?.mcp_wait_timeout_seconds);
+  }
   async function mcpSnapshot(principal, payload, signal) {
     const read = () => store.mcpCommand(principal.owner_id, principal.contact_id ?? null, 'snapshot', payload, {signal});
     let value = await read();
@@ -70,7 +76,7 @@ export function createMCP({store, command, ensureOpening, schedule, mcpContent})
     const cursor = args.cursor === undefined ? initial.read_cursor : object(args.cursor);
     ensure(Object.keys(cursor).every(key => ['sequence','epoch'].includes(key)), 'invalid_cursor');
     integer(cursor.sequence,'cursor'); ensure(Number.isInteger(cursor.epoch) && cursor.epoch>=-1,'invalid_cursor');
-    const deadline = Date.now() + waitTimeout(args.timeout_seconds) * 1000;
+    const deadline = Date.now() + await callWaitTimeout(principal,args,initial.call) * 1000;
     while (true) {
       ensure(!signal?.aborted, 'wait_cancelled');
       let value = await mcpSnapshot(principal, {call_id:callId,after_sequence:cursor.sequence,...(!principal.wake_bridge ? {unread:true} : {}),limit:principal.wake_bridge?50:100}, signal);
@@ -106,7 +112,9 @@ export function createMCP({store, command, ensureOpening, schedule, mcpContent})
   async function replyAndWait(principal, args, signal) {
     ensure(typeof args.text==='string' && args.text.trim().length>0 && args.text.length<=100000,'invalid_text');
     ensure(args.wait_for_input===undefined || typeof args.wait_for_input==='boolean','invalid_wait_for_input');
-    const timeoutSeconds=waitTimeout(args.timeout_seconds);
+    // Validate explicit integration overrides before submitting a reply. The
+    // ordinary wait resolves the saved preference using this call's contact.
+    if(args.timeout_seconds !== undefined)waitTimeout(args.timeout_seconds);
     const callID=await boundCallID(principal,args);
     const accepted=await store.mcpCommand(principal.owner_id,principal.contact_id??null,'send',{
       call_id:callID,request_id:crypto.randomUUID(),text:args.text,
@@ -115,7 +123,7 @@ export function createMCP({store, command, ensureOpening, schedule, mcpContent})
     try {
       // A submitted reply confirms the call is connected, even without a prior wait.
       await store.mcpCommand(principal.owner_id,principal.contact_id??null,'delivered',{call_id:callID,...accepted.cursor});
-      return {value:{reply_accepted:true,...await waitForInput(principal,{call_id:callID,timeout_seconds:timeoutSeconds},signal)},cursor:accepted.cursor};
+      return {value:{reply_accepted:true,...await waitForInput(principal,{call_id:callID,...(args.timeout_seconds !== undefined ? {timeout_seconds:args.timeout_seconds} : {})},signal)},cursor:accepted.cursor};
     } catch(error) {
       return {value:{...accepted,wait_error:{code:error instanceof ConnectorError?error.code:'wait_failed'}},cursor:accepted.cursor};
     }
@@ -190,6 +198,7 @@ export function createMCP({store, command, ensureOpening, schedule, mcpContent})
         }
         switch(params.name) {
           case 'tincall_call':
+            if(args.timeout_seconds !== undefined)waitTimeout(args.timeout_seconds);
             if(principal.wake_bridge || principal.mcp_call_id) {
               const bound=await boundCallID(principal,args);
               try {
@@ -210,7 +219,7 @@ export function createMCP({store, command, ensureOpening, schedule, mcpContent})
             }
             if(value.call && !value.error) {
               const call_id=value.call.id;
-              const seconds=waitTimeout(args.timeout_seconds);
+              const seconds=await callWaitTimeout(principal,args,value.call);
               await store.mcpCommand(principal.owner_id,principal.contact_id??null,'dial_wait',{call_id,until:new Date(Date.now()+seconds*1000).toISOString()});
               try {
                 value=await waitForInput({...principal,wake_bridge:false},{call_id,timeout_seconds:seconds},signal);
@@ -347,7 +356,7 @@ export function createMCP({store, command, ensureOpening, schedule, mcpContent})
     schedule((async()=>{
       let response;
       try {
-        const result=await mcpMessage(message,principal,['2024-11-05'],AbortSignal.timeout(125000));
+        const result=await mcpMessage(message,principal,['2024-11-05'],AbortSignal.timeout(140000));
         if(result.status===202)return;
         response=await result.json();
       } catch(error){

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: LicenseRef-Tincall-Personal-Use
 
 import Contacts
+import Intents
 import SwiftUI
 import UIKit
 
@@ -22,14 +23,19 @@ struct TincallRootView: View {
     @State private var showsCall = false
     @State private var minimizedCallID: UUID?
     @State private var isDialing = false
+    @State private var dialingTask: Task<Void, Never>?
+    @State private var opensCallDirectly = false
     @State private var showsConfiguration = false
     @State private var showsCallRecords = false
     @State private var showsCallPreview = false
+    @State private var dismissContactEditorRequest: UUID?
     @State private var isRecordDetailVisible = false
     @State private var isSettingsSubpageVisible = false
     @State private var callDraft = ""
     @State private var dataSharingReviewConnections: [ConnectionProfile] = []
     @State private var showsDataSharingReview = false
+    @State private var systemCallError: String?
+    @State private var systemPhoneURL: URL?
     private var callActivity: CallActivityController { runtime.callActivity }
     @State private var configurationIssue: String? = String(localized: "请选择联系人并配置连接")
 
@@ -38,10 +44,11 @@ struct TincallRootView: View {
     }
 
     private var callPageIsVisible: Bool {
-        showsCall || (activeCallID != nil && activeCallID != minimizedCallID)
+        showsCall || runtime.launchCall != nil || (activeCallID != nil && activeCallID != minimizedCallID)
     }
 
     private func closeCallPage() {
+        opensCallDirectly = false
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.3)) {
             minimizedCallID = activeCallID
             showsCall = false
@@ -55,23 +62,8 @@ struct TincallRootView: View {
                     TabView(selection: $selectedPage) {
                         NavigationStack {
                             ContactsScreen(store: configuration, isCallActive: coordinator.isCallActive,
-                                           onSelectRole: { id in
-                                guard !coordinator.isCallActive, !isDialing else { return }
-                                selectedRoleID = id
-                                refreshConfiguration()
-                                guard configurationIssue == nil,
-                                      let role = resolvedCallRole(configuration.roles.first { $0.id == id },
-                                                                  configuration: configuration) else {
-                                    showsCall = true
-                                    return
-                                }
-                                isDialing = true
-                                Task {
-                                    await coordinator.start(role: role, connections: configuration.connections,
-                                                            retention: configuration.retention, historyRecords: records?.records ?? [])
-                                    if isDialing { showsCall = true; isDialing = false }
-                                }
-                            }, records: records)
+                                           onSelectRole: startCall, records: records,
+                                           dismissEditorRequest: dismissContactEditorRequest)
                             .background(dockNavigationObserver(for: .contacts))
                         }
                         .toolbar(.hidden, for: .tabBar)
@@ -126,28 +118,6 @@ struct TincallRootView: View {
                             .padding(.bottom, dockPresentation.isDockShown ? 70 : 0)
                         }
                     }
-                    .onOpenURL { url in
-                        guard url.scheme == "tincall", url.host == "call" else { return }
-                        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
-                        if queryItems?.contains(where: { $0.name == "preview" && $0.value == "1" }) == true {
-                            guard showsCallPreview,
-                                  queryItems?.contains(where: { $0.name == "compose" && $0.value == "1" }) == true,
-                                  let previewStartedAt = CallTextInputRequest.shared.previewStartedAt else { return }
-                            CallTextInputRequest.shared.previewRequestedAt = previewStartedAt
-                            return
-                        }
-                        guard coordinator.isCallActive || runtime.incoming.answeringCall != nil else { return }
-                        let compose = queryItems?.contains { $0.name == "compose" && $0.value == "1" } == true
-                        var transaction = Transaction(animation: nil)
-                        transaction.disablesAnimations = true
-                        withTransaction(transaction) {
-                            CallTextInputRequest.shared.startedAt = compose ? coordinator.record?.startedAt : nil
-                            showsConfiguration = false
-                            showsCallRecords = false
-                            showsCallPreview = false
-                            showsCall = true
-                        }
-                    }
                     .onChange(of: coordinator.isCallActive) { _, active in
                         if active {
                             presentActiveCall(animated: isDialing)
@@ -161,6 +131,9 @@ struct TincallRootView: View {
                             if !coordinator.endedByRemote { closeCallPage() }
                             callDraft = ""
                         }
+                    }
+                    .onChange(of: coordinator.phase) { _, phase in
+                        if phase == .active { runtime.donateActiveCallContact() }
                     }
                     .onChange(of: selectedRoleID) {
                         if !coordinator.isCallActive { callDraft = "" }
@@ -179,11 +152,12 @@ struct TincallRootView: View {
                         NavigationStack {
                             callScreen(configuration: configuration, coordinator: coordinator)
                         }
-                        .transition(reduceMotion ? .opacity : .move(edge: .bottom))
+                        .transition(opensCallDirectly || runtime.launchCall != nil ? .identity
+                            : (reduceMotion ? .opacity : .move(edge: .bottom)))
                         .zIndex(1)
                     }
                 }
-                .animation(reduceMotion || (callPageIsVisible && runtime.incoming.answeringCall != nil)
+                .animation(reduceMotion || opensCallDirectly || runtime.launchCall != nil || (callPageIsVisible && runtime.incoming.answeringCall != nil)
                     ? nil : .easeInOut(duration: 0.3), value: callPageIsVisible)
                 .onChange(of: runtime.incoming.answeringCall?.id) { _, id in
                     if id != nil { presentActiveCall() }
@@ -199,6 +173,15 @@ struct TincallRootView: View {
         .fullScreenCover(isPresented: Binding(get: { runtime.access.showsUnlock }, set: { runtime.access.showsUnlock = $0 })) {
             NavigationStack { CallAccessScreen(isModal: true) }
         }
+        .onOpenURL(perform: handleOpenURL)
+        .onContinueUserActivity("INStartCallIntent", perform: handleSystemCall)
+        .onContinueUserActivity("INStartAudioCallIntent", perform: handleSystemCall)
+        .alert("Tincall", isPresented: Binding(get: { systemCallError != nil }, set: { if !$0 { systemCallError = nil } })) {
+            if let systemPhoneURL {
+                Button("使用系统电话拨打") { UIApplication.shared.open(systemPhoneURL) }
+            }
+            Button("好", role: .cancel) { systemCallError = nil }
+        } message: { Text(systemCallError ?? "") }
         .sheet(isPresented: $showsDataSharingReview, onDismiss: {
             runtime.refreshDataSharingConsent()
             refreshConfiguration()
@@ -219,7 +202,14 @@ struct TincallRootView: View {
         } message: { Text(runtime.incoming.errorMessage ?? "") }
         .task {
             if configuration == nil { load() }
-            selectedRoleID = coordinator?.isCallActive == true ? coordinator?.record?.roleID : configuration?.roles.first?.id
+            if selectedRoleID == nil {
+                selectedRoleID = runtime.launchCall?.roleID
+                    ?? (coordinator?.isCallActive == true ? coordinator?.record?.roleID : configuration?.roles.first?.id)
+            }
+            if let launchCall = runtime.launchCall {
+                handleSystemCall(launchCall.intent)
+                runtime.launchCall = nil
+            }
             refreshConfiguration()
             presentActiveCall()
             dataSharingReviewConnections = configuration?.connections.filter { DataSharingConsent.needsReview($0) } ?? []
@@ -233,7 +223,6 @@ struct TincallRootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                presentActiveCall()
                 Task { await configuration?.refreshLinkedContacts() }
             }
         }
@@ -246,15 +235,113 @@ struct TincallRootView: View {
     private func presentActiveCall(animated: Bool = false) {
         let id = runtime.incoming.answeringCall?.role.id
             ?? (coordinator?.isCallActive == true ? coordinator?.record?.roleID : nil)
-        guard let id else { return }
+        guard let id, activeCallID != minimizedCallID else { return }
         var transaction = Transaction(animation: animated && !reduceMotion ? .easeInOut(duration: 0.3) : nil)
         transaction.disablesAnimations = !animated
         withTransaction(transaction) {
             selectedRoleID = id
+            dismissContactEditorRequest = UUID()
             showsConfiguration = false
             showsCallRecords = false
             showsCallPreview = false
             showsCall = true
+        }
+    }
+
+    private func startCall(_ id: UUID) {
+        guard let configuration, let coordinator, !coordinator.isCallActive, !isDialing else { return }
+        selectedRoleID = id
+        refreshConfiguration()
+        guard configurationIssue == nil,
+              let role = resolvedCallRole(configuration.roles.first { $0.id == id }, configuration: configuration) else {
+            showsCall = true
+            return
+        }
+        isDialing = true
+        dialingTask = Task {
+            await coordinator.start(role: role, connections: configuration.connections,
+                                    retention: configuration.retention, historyRecords: records?.records ?? [])
+            guard !Task.isCancelled else { return }
+            if isDialing { showsCall = true; isDialing = false }
+        }
+    }
+
+    private func handleOpenURL(_ url: URL) {
+        if url.scheme?.lowercased() == "tel" {
+            handleSystemCall(SystemCallContact.intent(for: url))
+            return
+        }
+        guard url.scheme == "tincall", url.host == "call" else { return }
+        let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        if queryItems?.contains(where: { $0.name == "preview" && $0.value == "1" }) == true {
+            guard showsCallPreview,
+                  queryItems?.contains(where: { $0.name == "compose" && $0.value == "1" }) == true,
+                  let previewStartedAt = CallTextInputRequest.shared.previewStartedAt else { return }
+            CallTextInputRequest.shared.previewRequestedAt = previewStartedAt
+            return
+        }
+        guard let coordinator, coordinator.isCallActive || runtime.incoming.answeringCall != nil else { return }
+        let compose = queryItems?.contains { $0.name == "compose" && $0.value == "1" } == true
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            CallTextInputRequest.shared.startedAt = compose ? coordinator.record?.startedAt : nil
+            opensCallDirectly = true
+            dismissContactEditorRequest = UUID()
+            showsConfiguration = false
+            showsCallRecords = false
+            showsCallPreview = false
+            showsCall = true
+        }
+    }
+
+    private func handleSystemCall(_ activity: NSUserActivity) {
+        handleSystemCall(activity.interaction?.intent)
+    }
+
+    private func handleSystemCall(_ intent: INIntent?) {
+        systemPhoneURL = nil
+        if configuration == nil { load() }
+        guard let configuration, let coordinator else { return }
+        do {
+            let role = try SystemCallContact.role(for: intent, roles: configuration.roles, records: records?.records ?? [])
+            if coordinator.isCallActive || runtime.incoming.answeringCall != nil || isDialing {
+                let currentRoleID = runtime.incoming.answeringCall?.role.id
+                    ?? (coordinator.isCallActive ? coordinator.record?.roleID : selectedRoleID)
+                guard currentRoleID == role.id else {
+                    systemCallError = String(localized: "已有通话正在进行")
+                    return
+                }
+                // SwiftUI can also deliver the same URL/activity after scene connection.
+                // Reopen the existing call without creating another call or busy alert.
+                var transaction = Transaction(animation: nil)
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    opensCallDirectly = true
+                    dismissContactEditorRequest = UUID()
+                    showsConfiguration = false
+                    showsCallRecords = false
+                    showsCallPreview = false
+                    showsCall = true
+                }
+                return
+            }
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                opensCallDirectly = true
+                selectedRoleID = role.id
+                dismissContactEditorRequest = UUID()
+                showsConfiguration = false
+                showsCallRecords = false
+                showsCallPreview = false
+                showsCall = true
+                startCall(role.id)
+            }
+        } catch {
+            systemPhoneURL = SystemCallContact.telephonyURL(for: intent)
+            systemCallError = (error as? TincallError)?.message
+                ?? String(localized: "无法确定要拨打的 Tincall 联系人，请在 App 中选择。")
         }
     }
 
@@ -348,8 +435,9 @@ struct TincallRootView: View {
         selectedRoleID = role.id
         showsCallRecords = false
         isDialing = true
-        Task {
+        dialingTask = Task {
             await coordinator.resumeExternal(record: record, role: role, connections: configuration.connections, retention: configuration.retention)
+            guard !Task.isCancelled else { return }
             if isDialing { showsCall = true; isDialing = false }
         }
     }
@@ -358,40 +446,43 @@ struct TincallRootView: View {
     private func callScreen(configuration: LocalConfigurationStore, coordinator: CallCoordinator) -> some View {
         let answeringCall = runtime.incoming.answeringCall
         let isAnswering = answeringCall != nil && !coordinator.isCallActive
-        let identity = coordinator.isCallActive ? coordinator.record?.roleID : (answeringCall?.role.id ?? selectedRoleID)
+        let isStarting = isAnswering || runtime.launchCall != nil || (isDialing && !coordinator.isCallActive)
+        let identity = coordinator.isCallActive ? coordinator.record?.roleID
+            : (answeringCall?.role.id ?? runtime.launchCall?.roleID ?? selectedRoleID)
         let role = configuration.roles.first { $0.id == identity }
-        let displayedRecord = (isAnswering || coordinator.phase == .connecting) ? nil
+        let displayedRecord = (isStarting || coordinator.phase == .connecting) ? nil
             : coordinator.record.flatMap { $0.roleID == identity ? $0 : nil }
         let caption = voiceCaption(displayedRecord, partialTranscript: coordinator.partialTranscript,
-                                   awaitingSpeechTranscript: coordinator.isAwaitingSpeechTranscript,
                                    role: role, connections: configuration.connections)
         let interruptibleMessageID = coordinator.canInterrupt && !coordinator.speechInterruptionEnabled
             ? displayedRecord?.messages.last(where: { $0.role == .assistant })?.id : nil
         CallScreen(
             name: coordinator.isCallActive ? (coordinator.record?.roleName ?? "Tincall") : (role?.displayName ?? "Tincall"),
-            statusTitle: isAnswering ? String(localized: "正在连接") : statusTitle(coordinator),
-            statusDetail: isAnswering ? "" : (coordinator.isCallActive ? statusDetail(coordinator) : (configurationIssue ?? statusDetail(coordinator))),
-            isConfigured: isAnswering || coordinator.isCallActive || configurationIssue == nil,
-            isCallActive: isAnswering || coordinator.isCallActive,
-            canStart: !isAnswering && !coordinator.isCallActive,
+            statusTitle: isStarting ? String(localized: "正在连接") : statusTitle(coordinator),
+            statusDetail: isStarting ? "" : (coordinator.isCallActive ? statusDetail(coordinator) : (configurationIssue ?? statusDetail(coordinator))),
+            isConfigured: isStarting || coordinator.isCallActive || configurationIssue == nil,
+            isCallActive: isStarting || coordinator.isCallActive,
+            canStart: !isStarting && !coordinator.isCallActive,
             canSend: coordinator.canSend,
             microphoneAvailable: coordinator.phase == .active && !coordinator.isSwitchingSpeechRecognition,
             isMuted: coordinator.isMuted,
             canInterrupt: coordinator.canInterrupt,
-            errorMessage: isAnswering ? nil : (coordinator.errorMessage ?? callActivity.errorMessage),
+            errorMessage: isStarting ? nil : (coordinator.errorMessage ?? callActivity.errorMessage),
             onRetrySaving: !coordinator.savingCallIDs.isEmpty ? { coordinator.retrySaving() } : nil,
             onConfigure: { showsConfiguration = true },
             onStart: {
-                guard let role = resolvedCallRole(role, configuration: configuration) else { return }
-                Task { await coordinator.start(role: role, connections: configuration.connections, retention: configuration.retention,
-                                               historyRecords: records?.records ?? []) }
+                guard let role else { return }
+                startCall(role.id)
             },
             onToggleMute: { Task { await coordinator.toggleMute() } },
             onTextInputActiveChange: { coordinator.setTextInputActive($0) },
             onInterrupt: { coordinator.interrupt() },
             onHangUp: {
+                dialingTask?.cancel()
+                isDialing = false
                 if isAnswering { runtime.incoming.cancelAnsweringCall() }
                 else { coordinator.hangUp() }
+                if !coordinator.isCallActive { closeCallPage() }
             },
             onSend: { coordinator.sendText($0) },
             onSendImages: { coordinator.sendText($0, images: $1) },
@@ -408,8 +499,8 @@ struct TincallRootView: View {
             onReconnect: coordinator.externalConnectionLost ? { coordinator.reconnectExternal() } : nil,
             onShowRecords: records == nil ? nil : { showsCallRecords = true },
             onPreview: { showsCallPreview = true },
-            textStatusTitle: isAnswering ? String(localized: "正在连接") : textStatusTitle(coordinator),
-            textStatusDetail: isAnswering ? "" : (coordinator.isCallActive ? statusDetail(coordinator)
+            textStatusTitle: isStarting ? String(localized: "正在连接") : textStatusTitle(coordinator),
+            textStatusDetail: isStarting ? "" : (coordinator.isCallActive ? statusDetail(coordinator)
                 : (configurationIssue ?? statusDetail(coordinator))),
             assistantSpeaking: coordinator.isCallActive && coordinator.playback == .playing,
             userSpeaking: coordinator.isUserSpeaking,
@@ -486,10 +577,9 @@ struct TincallRootView: View {
         }
     }
 
-    private func voiceCaption(_ record: CallRecord?, partialTranscript: String, awaitingSpeechTranscript: Bool,
+    private func voiceCaption(_ record: CallRecord?, partialTranscript: String,
                               role: CallRole?, connections: [ConnectionProfile]) -> (text: String, isOutgoing: Bool) {
         if !partialTranscript.isEmpty { return (partialTranscript, true) }
-        if awaitingSpeechTranscript { return ("", true) }
         // Empty reply placeholders and playback lifecycle events must not erase the last words.
         for message in (record?.messages ?? []).reversed() {
             let text = liveTranscriptText(message, role: role, connections: connections)

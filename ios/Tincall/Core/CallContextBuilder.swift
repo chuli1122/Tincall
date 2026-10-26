@@ -21,6 +21,19 @@ struct CallContext: Sendable {
 
 /// Shared by the actual model request and its preview. Never mutates the original records.
 enum CallContextBuilder {
+    static func timeAwareInput(_ text: String, createdAt: Date, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        "[\(timeFormatter(timeZone: timeZone).string(from: createdAt))]\n\(text)"
+    }
+
+    private static func timeFormatter(timeZone: TimeZone = .autoupdatingCurrent) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }
+
     static func requestPreview(role: CallRole, connection: ConnectionProfile, historyRecords: [CallRecord], input: String,
                                currentMessages: [CallMessage] = [], ttsConnection: ConnectionProfile? = nil, userName: String = "",
                                loadImages: ((CallMessage) throws -> [Data])? = nil) throws -> CallRequestPreview {
@@ -44,11 +57,7 @@ enum CallContextBuilder {
         }
         let budget = role.effectiveContextCharacterBudget
         let timeAware = role.timeAwarenessEnabled == true
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .autoupdatingCurrent
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let formatter = timeFormatter()
         func content(for message: CallMessage) -> String {
             let text = message.id == audioInput?.messageID ? "" : message.recordedText
             guard timeAware else { return text }
@@ -67,7 +76,7 @@ enum CallContextBuilder {
         }
         let openingEvent = assistantInitiated && messages.isEmpty ? """
         <call_event>
-        这是 Tincall 发出的通话状态通知，不是用户发言。你正在主动给对方打电话，请结合你的人设与已有上下文，准备一句自然的开场白，在对方接听后先开口。对方尚未说话，不要编造对方的发言，也不要朗读这条通知。
+        这是 Tincall 发出的通话状态通知，不是对方发言。你正在主动给对方打电话，请结合你的人设与已有上下文，准备一句自然的开场白，在对方接听后先开口。对方尚未说话，不要编造对方的发言，也不要朗读这条通知。
         </call_event>
         """ : ""
         guard latest != nil || !openingEvent.isEmpty else { throw TincallError(message: String(localized: "请填写本轮输入后预览请求")) }
@@ -76,7 +85,7 @@ enum CallContextBuilder {
         let name = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         let scene = """
         <call_context>
-        你正在通过 Tincall 与对方通话。通话双方：user 是「\(name.isEmpty ? "用户" : name)」，assistant 是「\(role.displayName)」。
+        你正在通过 Tincall 与对方通话。通话双方：\(name.isEmpty ? "" : "user 是「\(name)」，")assistant 是「\(role.displayName)」。
         对方的消息可能来自语音转写、原声音频、文字输入或主动发送的图片。你的回复会显示在通话界面，并在开启语音时朗读。\(direction)
         当你确实决定结束本次通话时，先自然说完告别语，再在回复末尾另起一行输出 <end_call/>。这行是挂断指令，不会显示或朗读；App 会等本轮语音播完后挂断。不结束通话时不要输出此指令。
         </call_context>
@@ -87,7 +96,7 @@ enum CallContextBuilder {
         let expression = expressionText.isEmpty ? "" : "<tts_instructions>\n\(expressionText)\n</tts_instructions>"
         let timeInstruction = timeAware ? """
         <time_awareness>
-        对方消息开头的 [yyyy-MM-dd HH:mm:ss] 是该消息的发送时间，使用手机本地时区（\(formatter.timeZone.identifier)）。据此理解消息之间的时间间隔，不必每次提及时间。
+        对方消息开头的 [yyyy-MM-dd HH:mm:ss] 是该消息的发送时间，使用手机本地时区。据此理解消息之间的时间间隔，不必每次提及时间。
         这些时间标记是系统元数据，不是对话正文。回复中不要复制或生成这些标记。
         </time_awareness>
         """ : ""

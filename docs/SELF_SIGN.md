@@ -6,12 +6,12 @@
 
 在 [最新发布页](https://github.com/chuli1122/Tincall/releases/latest) 的 Assets 中下载 `*-selfsign-unsigned.ipa`，使用自己的签名方式重签安装，可省去源码编译和 Xcode 构建。具体签名工具需要什么电脑或账号，以该工具说明为准；IPA 本身不让任意设备免签安装。
 
-签名工具须正确处理主 App、实时活动扩展及其权限。App Group 和推送需要签名团队与描述文件支持，不能保证所有重签方式都保留这些功能。签名有效期到期后需要重新签名。
+签名工具须正确处理主 App、实时活动扩展 `TincallCallWidget`、通话 Intent 扩展 `TincallCallIntents`、框架及其权限。App Group 和推送需要签名团队与描述文件支持，不能保证所有重签方式都保留这些功能。签名有效期到期后需要重新签名。
 
 重签成品 IPA 时，下文修改 Xcode／xcconfig 的步骤不会改变已有二进制；需要由重签工具实际完成以下对应设置：
 
-- 修改主 App 和扩展的 Bundle ID，并为两者使用匹配的描述文件与签名权限。
-- 两者的 App Group 及主 App `Info.plist` 中已展开的 `TincallAppGroupIdentifier` 必须指向自己已授权的同一共享组；不能只替换签名里的组名。
+- 修改主 App 和两个扩展的 Bundle ID，为三个 target 分别使用匹配的描述文件与签名权限。
+- 主 App 和实时活动扩展的 App Group，以及这两个包的 `Info.plist` 中已展开的 `TincallAppGroupIdentifier`，必须指向自己已授权的同一共享组；不能只替换签名里的组名。通话 Intent 扩展当前不使用共享组。
 - 后台来电须保留主 App 的 `aps-environment`，并为最终主 App 标识配置自己的 APNs 发送端。完整步骤、变量示例、手机绑定与排错见 [自签推送配置](../cloudflare/README.md#自签后台来电配置步骤)。
 
 若工具无法正确处理这些标识与权限，使用下面的源码构建方式。免费个人签名不提供后台推送来电；普通拨出通话及已配置服务的前台来电不依赖 APNs。
@@ -22,26 +22,29 @@
 
 需要 Mac、能构建本工程的 Xcode，以及自己的 Apple 开发者账号。工程使用 Swift 6、iOS 26 SDK 能力；Xcode 还须支持手机当前系统。首次构建会解析 ONNX Runtime 1.24.2，本地 LAME 源码已随库提供。依赖许可见 [第三方声明](third_party.md)。
 
-## 先配置两个 target
+## 先配置三个 target
 
-用 Xcode 打开 `ios/Tincall.xcodeproj`，选择 `Tincall` scheme。在两个 target 的 Signing & Capabilities 中分别设置自己的 Team，保持自动签名，并更换唯一标识：
+用 Xcode 打开 `ios/Tincall.xcodeproj`，选择 `Tincall` scheme。在三个 target 的 Signing & Capabilities 中分别设置自己的 Team，保持自动签名，并更换唯一标识：
 
 | Target | 示例 Bundle Identifier |
 | --- | --- |
 | Tincall | `com.yourname.tincall` |
 | TincallCallWidget | `com.yourname.tincall.CallWidget` |
+| TincallCallIntents | `com.yourname.tincall.CallIntents` |
 
-扩展标识必须以前缀“主 App 标识 + 点”开头。Debug 和 Release 都要检查。不要用一个全局 PRODUCT_BUNDLE_IDENTIFIER 命令参数同时覆盖两个 target，也不要复用作者的团队、证书或描述文件。
+两个扩展标识都必须以前缀“主 App 标识 + 点”开头。Debug、Release、StoreDebug 和 StoreRelease 都要检查。不要用一个全局 PRODUCT_BUNDLE_IDENTIFIER 命令参数同时覆盖三个 target，也不要复用作者的团队、证书或描述文件。
 
 ## App Group 与推送的实际位置
 
-当前两个 target 已使用 App Group。修改 `ios/TincallCallWidget/CallActivityAppGroup.xcconfig` 中的 `TINCALL_APP_GROUP_IDENTIFIER`，例如 `group.com.yourname.tincall`，并在自己的团队中给两个 App ID 授权同一组。代码通过 Info.plist 的 `TincallAppGroupIdentifier` 读取该值。
+主 App 与实时活动扩展使用 App Group，通话 Intent 扩展当前不使用共享组。修改 `ios/TincallCallWidget/CallActivityAppGroup.xcconfig` 中的 `TINCALL_APP_GROUP_IDENTIFIER`，例如 `group.com.yourname.tincall`，并在自己的团队中给主 App 与实时活动扩展的 App ID 授权同一组。代码通过 Info.plist 的 `TincallAppGroupIdentifier` 读取该值。
 
-以下 entitlements 均只引用 `$(TINCALL_APP_GROUP_IDENTIFIER)`，无需分别改写组名。修改共享 xcconfig 后，在两个 target 的 Signing & Capabilities 中确认授权组与之相同：
+以下 entitlements 中的共享组均引用 `$(TINCALL_APP_GROUP_IDENTIFIER)`，无需分别改写组名。修改共享 xcconfig 后，在主 App 与实时活动扩展的 Signing & Capabilities 中确认授权组与之相同：
 
 - `ios/Tincall/Resources/Tincall.entitlements`：无推送主 App。
 - `ios/Tincall/Resources/TincallPush.entitlements`：带推送主 App。
 - `ios/TincallCallWidget/TincallCallWidget.entitlements`：扩展。
+
+主 App 的两个 entitlements 文件还包含 Siri 与默认通话 App 权限，需由自己的团队和描述文件授权；通话 Intent 扩展没有独立 entitlements 文件。不要把三个 target 配成同一套权限。
 
 当前共享 xcconfig 默认启用主 App 的推送 entitlements，Debug 使用 development，Release 使用 production；`ios/Push.xcconfig` 是同方向的显式覆盖，不是默认启用推送的唯一入口。签名、App 内环境、发送端 APNs 环境与 topic 必须匹配。改 Bundle ID 后还要同步自己的发送端 topic。
 
@@ -84,4 +87,4 @@ xcrun devicectl device install app --device YOUR_DEVICE_UDID \
 
 ## 版本与打包
 
-关于页及反馈模板从安装包读取版本和构建号。自行编译时，主 App 与扩展的版本必须一致；不要把旧 IPA 重命名为新版。维护者可按[发行打包说明](release.md)生成没有商店购买限制、供个人重签的 IPA；签名及推送权限仍需按本页配置。英文步骤见 [English setup guide](setup.en.md)。
+关于页及反馈模板从安装包读取版本和构建号。自行编译时，主 App 与两个扩展的版本和构建号必须一致；不要把旧 IPA 重命名为新版。维护者可按[发行打包说明](release.md)生成没有商店购买限制、供个人重签的 IPA；签名及推送权限仍需按本页配置。英文步骤见 [English setup guide](setup.en.md)。

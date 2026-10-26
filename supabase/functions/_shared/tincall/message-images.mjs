@@ -83,14 +83,16 @@ export function createMessageImages(store) {
     return result;
   }
   async function mcpContent(principal, value) {
-    const text=mcpText(value);
-    const content = text ? [{type:'text',text}] : [];
-    const messages = value.input ? [value.input] : value.messages ?? [];
-    for (const [group, message] of messages.filter(message => message.images?.length).entries()) {
-      for (let index = 0; index < (message.images?.length ?? 0); index++) {
-        const image = await loadImage(principal.owner_id, value.call.id, message.images[index]);
-        content.push({type:'text', text:`图片组 ${group + 1} · 图片 ${index + 1}`});
-        content.push({type:'image', data:image.data_base64, mimeType:image.mime_type});
+    const content = [];
+    for (const part of mcpParts(value)) {
+      const text = typeof part === 'string' ? part : mcpMessageXML(part, value.call);
+      if (content.at(-1)?.type === 'text') content.at(-1).text += '\n\n' + text;
+      else content.push({type:'text', text});
+      if (typeof part !== 'string') {
+        for (const reference of part.images ?? []) {
+          const image = await loadImage(principal.owner_id, value.call.id, reference);
+          content.push({type:'image', data:image.data_base64, mimeType:image.mime_type});
+        }
       }
     }
     return content;
@@ -98,8 +100,30 @@ export function createMessageImages(store) {
   return {linkedCallRecord, saveImages, backendMessages, mcpContent};
 }
 
-// Readable content for both transports; ordinary structured output is reduced in mcp.mjs.
-function mcpText(value) {
+function xmlEscape(value) {
+  return value.replace(/[&<>]/g, character => ({'&':'&amp;', '<':'&lt;', '>':'&gt;'}[character]));
+}
+
+export function mcpMessageXML(message, call) {
+  const name = message.role === 'user' ? call?.user_name?.trim() : 'TA';
+  let text = message.text ?? '';
+  // The phone persists this local-time prefix for retries. Move only that
+  // envelope into an attribute when presenting the message to the model.
+  const stamp = message.role === 'user' ? /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\n/.exec(text) : null;
+  if (stamp) text = text.slice(stamp[0].length);
+  const attributes = [];
+  if (name) attributes.push(['name', name]);
+  if (stamp) attributes.push(['timestamp', stamp[1]]);
+  if (['generating','interrupted','failed'].includes(message.status)) {
+    attributes.push(['status', message.status]);
+    if (message.interruption_reason) attributes.push(['reason', message.interruption_reason]);
+  }
+  const suffix = attributes.map(([key, value]) => ` ${key}="${xmlEscape(value).replace(/"/g, '&quot;').replace(/\n/g, '&#10;').replace(/\r/g, '&#13;').replace(/\t/g, '&#9;')}"`).join('');
+  return `<message${suffix}>\n  <text>${xmlEscape(text)}</text>\n</message>`;
+}
+
+// Keep each message adjacent to its native image blocks on both MCP transports.
+function mcpParts(value) {
   const parts = [];
   if (value.error) {
     parts.push(value.error.message || `请求未完成：${value.error.code}`);
@@ -113,12 +137,9 @@ function mcpText(value) {
   else if (value.call === null) parts.push('当前没有进行中的通话。');
   else if (value.call?.status === 'ringing') parts.push('正在呼叫，等待对方接听。');
   else if (value.call?.status === 'active' && !value.reply_accepted && !value.messages?.some(message=>message.text || message.images?.length)) parts.push('通话进行中。');
-  let imageGroup = 0;
-  for (const message of value.messages ?? []) {
+  for (const message of value.input ? [value.input] : value.messages ?? []) {
     if (!message.text && !message.images?.length && message.status !== 'failed') continue;
-    const label = (message.role === 'user' ? (value.call?.user_name || '用户') : '你') + (message.images?.length ? `（图片组 ${++imageGroup}）` : '');
-    const status = {generating:'生成中',interrupted:'已中断',failed:'失败'}[message.status];
-    parts.push(`${label}${status ? `（${status}${message.interruption_reason ? `：${message.interruption_reason}` : ''}）` : ''}：\n${message.text || (message.images?.length ? '（图片）' : '（无正文）')}`);
+    parts.push(message);
   }
   if (value.call?.status === 'ended' && value.call.summary) parts.push(`通话摘要：\n${value.call.summary}`);
   if (value.voice_instructions) parts.push(`本次通话的朗读要求：\n${value.voice_instructions}`);
@@ -132,5 +153,6 @@ function mcpText(value) {
   }
   if (value.next_action?.tool && value.event !== 'timeout') parts.push('请调用 tincall_wait 继续等待。');
   else if (value.next_action === 'finish_task') parts.push(value.message);
-  return parts.join('\n\n') || (value.reply_accepted ? '' : value.message) || '';
+  if (!parts.length && !value.reply_accepted && value.message) parts.push(value.message);
+  return parts;
 }

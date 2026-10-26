@@ -72,6 +72,8 @@ private final class EndingModelProtocol: URLProtocol, @unchecked Sendable {
         let model = ConnectionProfile(name: "Synthetic", provider: .openAICompatible, endpoint: URL(string: "https://call-ending.invalid"), model: "synthetic")
         let stt = ConnectionProfile(name: "Synthetic STT", provider: .appleSpeech)
         let tts = ConnectionProfile(name: "Synthetic TTS", provider: .elevenLabs, model: "eleven_v3", voiceID: "synthetic")
+        for connection in [model, tts] { DataSharingConsent.setAllowed(true, for: connection) }
+        defer { for connection in [model, tts] { DataSharingConsent.setAllowed(false, for: connection) } }
         for connection in [model, tts] { try credentials.write("synthetic-test-key", connectionID: connection.id) }
         defer { for connection in [model, tts] { try? credentials.delete(connectionID: connection.id) } }
         let role = CallRole(name: "Synthetic", modelConnectionID: model.id, sttConnectionID: stt.id, ttsConnectionID: tts.id)

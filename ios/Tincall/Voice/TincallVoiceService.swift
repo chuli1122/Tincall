@@ -241,7 +241,9 @@ final class TincallVoiceService: VoiceService {
                 throw TincallError(message: String(localized: "请填写有效的 ElevenLabs 音色和模型"))
             }
             return .elevenLabs(ElevenLabsConfiguration(elevenLabsAPIKey: try secret(configuration.tts.id),
-                elevenLabsVoiceID: voiceID, elevenLabsModel: model))
+                elevenLabsVoiceID: voiceID, elevenLabsModel: model,
+                stability: configuration.tts.elevenLabsStability,
+                similarityBoost: configuration.tts.elevenLabsSimilarityBoost))
         case .miniMax:
             let region = configuration.tts.region ?? "china"
             guard region == "china" || region == "international" else { throw TincallError(message: String(localized: "MiniMax 地区无效")) }
