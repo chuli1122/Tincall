@@ -23,6 +23,8 @@ struct ExternalEventPage { let call: ExternalCallState }
 }
 @MainActor final class ExternalCallClient {
     var reads = 0
+    var eventReads = 0
+    var recoverRinging = false
     var activityStarts = 0
     var activityNames: [String] = []
     var streams = 0
@@ -77,7 +79,14 @@ struct ExternalEventPage { let call: ExternalCallState }
         removals.append((connection.id, deviceID, requestID))
         if connection.id == removalFailure { throw removalError }
     }
-    func events(connection: ConnectionProfile, callID: UUID, after: Int) async throws -> ExternalEventPage { ExternalEventPage(call: ExternalCallState()) }
+    func events(connection: ConnectionProfile, callID: UUID, after: Int) async throws -> ExternalEventPage {
+        eventReads += 1
+        if recoverRinging {
+            if eventReads == 1 { throw URLError(.networkConnectionLost) }
+            return ExternalEventPage(call: ExternalCallState(status: "ended"))
+        }
+        return ExternalEventPage(call: ExternalCallState())
+    }
 }
 
 private final class AnswerProvider: CXProvider, @unchecked Sendable {
@@ -115,8 +124,8 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
 }
 
 @main struct IncomingForegroundChecks {
-    @MainActor static func until(_ predicate: () -> Bool) async throws {
-        let deadline = Date().addingTimeInterval(2)
+    @MainActor static func until(timeout: TimeInterval = 2, _ predicate: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while !predicate() {
             precondition(Date() < deadline, "Timed out waiting for incoming subscription")
             try await Task.sleep(for: .milliseconds(10))
@@ -129,6 +138,7 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
         if CommandLine.arguments.contains("--bindings") { try await checkBindings(); return }
         if CommandLine.arguments.contains("--foreground-handoff") { try await checkForegroundHandoff(); return }
         if CommandLine.arguments.contains("--activity-after-answer") { try await checkIncomingActivitySuppression(); return }
+        if CommandLine.arguments.contains("--ring-recovery") { try await checkRingRecovery(); return }
         if CommandLine.arguments.contains("--missed-call") { try await checkMissedCaller(); return }
         if CommandLine.arguments.contains("--answer") { try await checkAnswer(); return }
         if CommandLine.arguments.contains("--outgoing") { try await checkOutgoing(); return }
@@ -399,6 +409,30 @@ private final class AnswerCallController: CXCallController, @unchecked Sendable 
         controller.cancelAnsweringCall()
         controller.monitorForeground(connections: [], active: false)
         print("PASS: incoming ringing and answering send no additional Live Activity alert")
+    }
+
+    @MainActor static func checkRingRecovery() async throws {
+        let suite = "TincallRingRecoveryChecks-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let client = ExternalCallClient()
+        client.recoverRinging = true
+        let provider = AnswerProvider(configuration: CXProviderConfiguration())
+        let controller = IncomingCallController(client: client, defaults: defaults, provider: provider)
+        let connection = ConnectionProfile(name: "Synthetic", provider: .genericConnector, endpoint: URL(string: "https://synthetic.invalid"))
+        let role = CallRole(name: "Synthetic caller")
+        var cancelled = 0
+        controller.canAcceptCall = { true }
+        controller.onResolveRole = { _, _, _ in role }
+        controller.onCancelRinging = { _ in cancelled += 1 }
+        controller.monitorForeground(connections: [connection], active: true)
+        try await until { client.callbacks[connection.id] != nil }
+        client.callbacks[connection.id]?(ExternalCallState())
+        try await until(timeout: 5) { provider.ended }
+        precondition(client.eventReads == 2 && cancelled == 1,
+                     "A transient status failure must not strand a ringing invitation")
+        controller.monitorForeground(connections: [], active: false)
+        print("PASS: ringing monitor recovers after a transient read failure and observes remote hangup")
     }
 
     @MainActor static func checkMissedCaller() async throws {

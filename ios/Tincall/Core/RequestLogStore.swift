@@ -103,7 +103,7 @@ final class RequestLogStore {
             if FileManager.default.fileExists(atPath: file.path) {
                 let archive = try JSONDecoder().decode(Archive.self, from: Data(contentsOf: file))
                 calls = archive.calls
-                entries = archive.entries
+                entries = archive.entries.sorted { $0.time < $1.time }
                 if let version = archive.version, version > 2 { throw CocoaError(.coderReadCorrupt) }
                 if archive.version != 2 {
                     // Finish all body writes before replacing the legacy archive. A partial
@@ -180,7 +180,10 @@ final class RequestLogStore {
 
     func append(_ entry: RequestLogEntry) {
         if let context = entry.context { ensureRound(context) }
+        let arrivedOutOfOrder = entries.last.map { $0.time > entry.time } ?? false
         entries.append(entry.indexEntry)
+        // Deferred requests can finish after newer entries; normal appends are already ordered.
+        if arrivedOutOfOrder { entries.sort { $0.time < $1.time } }
         dirtyBodies[entry.id] = RequestLogBody(entry)
         prune()
         persist()
@@ -248,13 +251,15 @@ final class RequestLogStore {
     }
 
     private func prune(keepingCall: UUID? = nil) {
-        entries.sort { $0.time < $1.time }
-        let previousCount = entries.count
         let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
-        entries.removeAll { $0.time < cutoff }
-        if entries.count != previousCount { needsBodyCleanup = true }
-        let retainedIDs = Set(entries.map(\.id))
-        dirtyBodies = dirtyBodies.filter { retainedIDs.contains($0.key) }
+        // Entries stay ordered, so routine updates need not sort or rebuild retention sets.
+        if let oldest = entries.first, oldest.time < cutoff {
+            entries.removeAll { $0.time < cutoff }
+            needsBodyCleanup = true
+            let retainedIDs = Set(entries.map(\.id))
+            dirtyBodies = dirtyBodies.filter { retainedIDs.contains($0.key) }
+        }
+        guard !calls.isEmpty else { return }
         let retained = Set(entries.compactMap { $0.context?.callID })
         // Preserve the latest call even before its first STT/model request arrives.
         let latestCall = calls.max { $0.startedAt < $1.startedAt }?.id

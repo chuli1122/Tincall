@@ -108,9 +108,16 @@ struct ScheduledCallSettings: View {
             if let time = schedule.daily_time {
                 Text("\(scheduleRepeatTitle(schedule.week_day)) \(String(time.prefix(5))) · \(schedule.time_zone ?? "")").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("下次来电：\(schedule.next_at)").font(.caption).foregroundStyle(.secondary)
+                Text("下次来电：\(nextCallTime(schedule.next_at))").font(.caption).foregroundStyle(.secondary)
             }
         }
+    }
+
+    private func nextCallTime(_ value: String) -> String {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value) else { return value }
+        return date.formatted(date: .abbreviated, time: .shortened)
     }
 
     private func refresh() async {

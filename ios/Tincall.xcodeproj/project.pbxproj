@@ -363,6 +363,7 @@
 				"$(SRCROOT)/../supabase/migrations/202610210002_tincall_mcp_conversation.sql",
 				"$(SRCROOT)/../supabase/migrations/202610210003_tincall_message_images.sql",
 				"$(SRCROOT)/../supabase/migrations/202610250001_tincall_mcp_wait_preferences.sql",
+				"$(SRCROOT)/../supabase/migrations/202610270001_tincall_hot_path_indexes.sql",
 			);
 			name = "Bundle Cloud Deployment";
 			outputPaths = (

@@ -365,16 +365,18 @@ export function createSQLiteStore(
   const wakeListeners = new Map();
   const wakeChanges = new Map();
   function transaction(fn) {
-    db.exec('BEGIN IMMEDIATE');
-    let result;
+    let result;let begun=false;
     try {
+      db.exec('BEGIN IMMEDIATE');begun=true;
       result = fn();
       db.exec('COMMIT');
     } catch (error) {
-      db.exec('ROLLBACK');
+      // SQLite may already have rolled back after an engine/IO failure.
+      if(begun)try { db.exec('ROLLBACK'); } catch {}
       incomingChanges.clear();
       wakeChanges.clear();
       if (error instanceof ConnectorError) throw error;
+      if([5,6].includes(error.errcode & 255))throw new ConnectorError('database_busy',503);
       throw new ConnectorError('database_request_failed', 400);
     }
     const changes = [...incomingChanges];
@@ -411,6 +413,7 @@ export function createSQLiteStore(
       CREATE UNIQUE INDEX IF NOT EXISTS tincall_job_epoch ON tincall_jobs(call_id,epoch);
       CREATE INDEX IF NOT EXISTS tincall_pending_jobs ON tincall_jobs(created_at) WHERE status='pending';
       CREATE INDEX IF NOT EXISTS tincall_message_call ON tincall_messages(call_id,sequence);
+      CREATE INDEX IF NOT EXISTS tincall_request_action ON tincall_requests(owner_id,action);
       CREATE INDEX IF NOT EXISTS tincall_record_index ON tincall_records(owner_id,updated_at,id);`);
     });
   } catch (error) {

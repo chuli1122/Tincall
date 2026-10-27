@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: 2026 Chuli (GitHub: chuli1122) <https://github.com/chuli1122/Tincall> -->
+<!-- SPDX-License-Identifier: LicenseRef-Tincall-Personal-Use -->
+
 # iOS 独立检查与 CI
 
 `ios/Tests/run_checks.py` 将真实生产源码与合成测试数据一起编译，运行已登记的 39 项 Swift 检查及其参数分支。新增顶层检查未登记会直接失败。它创建并最终删除独立模拟器，部分检查在 macOS 主机运行；不构建、安装或启动 Tincall App。

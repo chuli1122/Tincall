@@ -205,9 +205,31 @@ struct RequestLogChecks {
         try expect(ttsText.contains("合成文字：\n要朗读的完整文字") && ttsText.contains("结果：挂断时中止")
             && ttsText.contains("分段：2"), "export includes complete synthesis text and interruption outcome")
         await contents.flushPendingWrites()
+        try await outOfOrderRetentionChecks(in: directory.appendingPathComponent("ordered-retention"))
         try await storageAndPaginationChecks(in: directory)
         try await originalRequestChecks(in: directory.appendingPathComponent("original-requests"))
         print("PASS: local persistence, round attribution, HTTP/provider/transport errors, redaction, cancellation, crash recovery, seven-day retention without count cap, paged bodies, safe legacy migration, late completion, standalone requests and failed-read preservation")
+    }
+
+    @MainActor private static func outOfOrderRetentionChecks(in directory: URL) async throws {
+        let store = RequestLogStore(directory: directory)
+        let now = Date()
+        func entry(_ age: TimeInterval) -> RequestLogEntry {
+            RequestLogEntry(id: UUID(), time: now.addingTimeInterval(-age), service: .mcp,
+                step: .callControl, context: nil, segment: nil, outcome: .succeeded,
+                requestText: "Synthetic retained request")
+        }
+        let recent = entry(1), delayed = entry(60), expired = entry(8 * 86400)
+        store.append(recent)
+        store.append(delayed)
+        store.append(expired)
+        try expect(store.entries.map(\.id) == [delayed.id, recent.id], "delayed append stays ordered and expired append is pruned immediately")
+        await store.flushPendingWrites()
+        try expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("Bodies/" + expired.id.uuidString + ".json").path), "expired unsaved body is not written")
+        let reopened = RequestLogStore(directory: directory)
+        let saved = try reopened.load(reopened.entries)
+        try expect(saved.map(\.id) == [delayed.id, recent.id] && saved.allSatisfy { $0.requestText == "Synthetic retained request" }, "retained delayed entries and bodies survive restart")
+        await reopened.flushPendingWrites()
     }
 
     @MainActor private static func storageAndPaginationChecks(in root: URL) async throws {

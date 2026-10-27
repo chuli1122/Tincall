@@ -24,6 +24,32 @@ function fixture(t){
   return {directory,path,config,get store(){return store;},restart(){store.close();store=createSQLiteStore(config,path);return store;}};
 }
 
+test('SQLite automatic rollback preserves the original failure and discards unpublished call notifications',async t=>{
+  const f=fixture(t),db=new DatabaseSync(f.path),notified=[];
+  t.after(()=>db.close());
+  const unsubscribe=await f.store.subscribeIncoming(owner,call=>notified.push(call));t.after(unsubscribe);
+  db.exec("CREATE TRIGGER abort_call_receipt BEFORE INSERT ON tincall_requests WHEN NEW.action='call.create' BEGIN SELECT RAISE(ROLLBACK,'synthetic rollback'); END;");
+  await assert.rejects(f.store.command(owner,'call.create',mutation({call_id:crypto.randomUUID(),contact_id:'synthetic',source:'independent'})),{code:'database_request_failed'});
+  db.exec('DROP TRIGGER abort_call_receipt');
+  await f.store.command(owner,'device.put',mutation({device_id:crypto.randomUUID(),binding_id:crypto.randomUUID()}));
+  assert.equal((await f.store.command(owner,'call.current',{})).call,null);
+  assert.deepEqual(notified,[]);
+});
+
+test('record listing rejects an invalid date cursor with a specific client error',async t=>{
+  const f=fixture(t),connector=createConnector({store:f.store,config:f.config});
+  const response=await connector.handle(new Request('http://localhost/records?after=not-a-date',{headers:{Authorization:'Bearer phone'}}));
+  assert.equal(response.status,400);assert.equal((await response.json()).error.code,'invalid_cursor');
+});
+
+test('SQLite write lock exhaustion is retryable and a later transaction still works',async t=>{
+  const f=fixture(t),db=new DatabaseSync(f.path);t.after(()=>db.close());
+  db.exec('BEGIN IMMEDIATE');
+  try {await assert.rejects(f.store.command(owner,'call.current',{}),{code:'database_busy',status:503});}
+  finally {db.exec('ROLLBACK');}
+  assert.equal((await f.store.command(owner,'call.current',{})).call,null);
+});
+
 test('Node storage selection defaults to SQLite and partial Supabase configuration fails closed',async t=>{
   const f=fixture(t);const env={TINCALL_SQLITE_PATH:f.path};
   const selected=createNodeStore(f.config,key=>env[key]);assert.deepEqual(await selected.authenticate('phone'),{owner_id:owner,contact_id:null});selected.close();

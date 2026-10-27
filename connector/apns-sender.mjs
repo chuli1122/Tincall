@@ -3,7 +3,7 @@
 
 import {connect} from 'node:http2';
 import {createPrivateKey,sign,randomUUID} from 'node:crypto';
-import {readFileSync,mkdirSync,chmodSync} from 'node:fs';
+import {readFileSync,mkdirSync,chmodSync,openSync,closeSync} from 'node:fs';
 import {dirname} from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {ActivityPushError, LiveActivityPushRegistry, validateActivityToken, activityStartPayload} from './live-activity-push.mjs';
@@ -54,7 +54,9 @@ export function createAPNsTransport(config) {
 export function createPushGateway({databasePath,token,send}) {
   requireValue(token && token.length>=24,'push_token_required',503);
   mkdirSync(dirname(databasePath),{recursive:true,mode:0o700});
-  const db=new DatabaseSync(databasePath);chmodSync(databasePath,0o600);
+  const fd=openSync(databasePath,'a',0o600);closeSync(fd);
+  chmodSync(databasePath,0o600);
+  const db=new DatabaseSync(databasePath);
   db.exec(`pragma journal_mode=WAL;
     create table if not exists devices(binding_id text primary key,owner_id text not null,device_id text not null,device_token text not null,environment text not null,enabled integer not null default 1,unique(owner_id,device_id));
     create table if not exists deliveries(binding_id text not null,call_id text not null,contact_id text not null,state text not null,created_at integer not null,primary key(binding_id,call_id));`);

@@ -25,7 +25,7 @@ export function createCallJobs({store, config, fetcher, backendMessages}) {
     const controller = new AbortController();
     let expired = false; let cancelled = false; let completed = false;
     let started=false;let cancellationTask;
-    let checking = false;
+    let checking = false;let healthFailures=0;let healthLost=false;
     const binding = getBinding(config, owner, call.contact_id);
     const deliver = (action,payload) => store.command(owner,action,{request_id:crypto.randomUUID(),call_id:call.id,reply_id:job.reply_id,epoch:job.epoch,...payload});
     async function cancelUpstream() {
@@ -48,10 +48,16 @@ export function createCallJobs({store, config, fetcher, backendMessages}) {
       if (checking) return; checking=true;
       try {
         const current = await store.command(owner,'call.record',{call_id:call.id});
+        if(completed || controller.signal.aborted)return;
+        healthFailures=0;
         if (current.call.status!=='active' || current.call.epoch!==job.epoch) {
           cancelled=true;clearInterval(interval);cancellationTask=cancelUpstream();controller.abort();await cancellationTask;
         }
-      } catch { controller.abort(); } finally { checking=false; }
+      } catch {
+        // A failed read does not prove cancellation. Bound loss of monitoring
+        // without abandoning a live upstream or silently retrying generation.
+        if(!completed && !controller.signal.aborted && ++healthFailures>=3){healthLost=true;clearInterval(interval);controller.abort();}
+      } finally { checking=false; }
     },1000);
     try {
       validateBinding(binding);
@@ -88,7 +94,7 @@ export function createCallJobs({store, config, fetcher, backendMessages}) {
     } catch (error) {
       if(started && !cancelled && !completed) await cancelUpstream();
       if (!cancelled && !completed) {
-        const code=expired ? 'generation_timeout' : error instanceof ConnectorError ? error.code : 'generation_unavailable';
+        const code=expired ? 'generation_timeout' : healthLost ? 'health_check_lost' : error instanceof ConnectorError ? error.code : 'generation_unavailable';
         try { await deliver('reply.failed',{code}); } catch (failure) { if (!(failure instanceof ConnectorError && failure.code==='stale_epoch')) throw failure; }
       }
     } finally {clearTimeout(timeout);clearInterval(interval);controller.abort();if(cancellationTask)await cancellationTask;}

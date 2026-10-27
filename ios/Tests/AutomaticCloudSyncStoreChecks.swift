@@ -105,6 +105,46 @@ struct CloudSyncFailure: LocalizedError {
         let connection = ConnectionProfile(name: "Isolated fixture", provider: .genericConnector, endpoint: URL(string: "https://fixture.invalid"))
         do {
             Fixture.reset()
+            let (records, sync, directory) = try make("unreadable-local")
+            let local = record("Preserve unreadable local and cloud copies")
+            try records.save(local)
+            try sync.select(connection.id)
+            try sync.setAutomaticSyncEnabled(true)
+            await sync.synchronizeAutomatically(connection: connection)
+            check(Fixture.rows[local.id] != nil, "fixture establishes an existing cloud checkpoint")
+            let before = try Data(contentsOf: directory.appendingPathComponent("state.json"))
+            let manifest = directory.deletingLastPathComponent().appendingPathComponent("records/\(local.id.uuidString).json")
+            let unavailableBytes = Data("{synthetic unreadable local record".utf8)
+            try unavailableBytes.write(to: manifest)
+            try records.reload()
+            let reads = Fixture.ownerReads
+            let writes = Fixture.mutations.count
+            check(!sync.canSynchronizeRecord(local.id), "unreadable local IDs cannot be synchronized as missing records")
+            await sync.synchronizeAutomatically(connection: connection)
+            await sync.synchronize(connection: connection)
+            await sync.restore(connection: connection, id: local.id)
+            await sync.useLocal(connection: connection, id: local.id)
+            await sync.deleteRemote(connection: connection, id: local.id)
+            await sync.continuePending(connection: connection)
+            check(sync.errorMessage != nil && Fixture.ownerReads == reads && Fixture.mutations.count == writes, "unreadable records block automatic sync, conflict choices and cloud mutations before transport")
+            let after = try Data(contentsOf: directory.appendingPathComponent("state.json"))
+            let retained = try Data(contentsOf: manifest)
+            check(before == after && retained == unavailableBytes, "unreadable records neither set localRemoved checkpoints nor overwrite originals")
+            try JSONEncoder().encode(local).write(to: manifest)
+            try records.reload()
+            await sync.synchronize(connection: connection)
+            check(sync.errorMessage == nil && Fixture.mutations.count == writes, "manual sync resumes after files are readable without rewriting cloud history")
+            let unknown = manifest.deletingLastPathComponent().appendingPathComponent("unknown.json")
+            try unavailableBytes.write(to: unknown)
+            try records.reload()
+            check(!sync.canSynchronizeRecord(UUID()), "unidentified unreadable files block every record ID")
+            let readsBeforeUnknown = Fixture.ownerReads
+            await sync.synchronize(connection: connection)
+            check(sync.errorMessage != nil && Fixture.ownerReads == readsBeforeUnknown, "uncertain record ownership pauses sync without inferring deletion")
+            if CommandLine.arguments.contains("--unreadable-only") { return }
+        }
+        do {
+            Fixture.reset()
             let (records, sync, directory) = try make("destination-change")
             let originalOwner = Fixture.owner
             let initial = record("Synthetic destination guard")

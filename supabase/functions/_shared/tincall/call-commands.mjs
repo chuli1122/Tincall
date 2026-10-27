@@ -62,6 +62,7 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
   }
   async function command(principal, action, payload, signal) {
     const p = {...payload};
+    if(action==='record.list' && p.after!==undefined)ensure(typeof p.after==='string' && Number.isFinite(Date.parse(p.after)),'invalid_cursor');
     let source = p.source;
     let liveActivityPush;
     let callAccessExpiry;
@@ -108,7 +109,8 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
             });
           } catch { throw new ConnectorError('activity_push_unavailable', 503); }
           ensure(response.ok, 'activity_push_failed', 502);
-          ensure((await response.json()).accepted_by_apns === true, 'activity_push_failed', 502);
+          const receipt=await response.json().catch(()=>null);
+          ensure(receipt?.accepted_by_apns === true, 'activity_push_failed', 502);
           return {accepted_by_apns: true};
         }
         if (action === 'call.input') {

@@ -93,13 +93,23 @@ struct RecordListScreen: View {
 
     @ViewBuilder
     private var content: some View {
-        if isDockPage {
-            recordList
-                .contentMargins(.bottom, dockClearance, for: .scrollContent)
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-        } else {
-            recordList
+        VStack(spacing: 0) {
+            if let issue = store.storageIssue {
+                Text(issue)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
+            }
+            if isDockPage {
+                recordList
+                    .contentMargins(.bottom, dockClearance, for: .scrollContent)
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+            } else {
+                recordList
+            }
         }
     }
 

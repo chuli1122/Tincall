@@ -891,10 +891,12 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
         guard let invitation = invitations[id], let connection = invitation.connection else { return }
         RequestLogStore.shared.registerCall(id: id, startedAt: Date(), mode: invitations[id]?.role?.effectiveCallMode)
         invitations[id]?.ringMonitor = Task { [weak self, client] in
+            var consecutiveFailures = 0
             for _ in 0..<15 {
                 guard !Task.isCancelled, let self, self.invitations[id] != nil else { return }
                 do {
                     let page = try await client.events(connection: connection, callID: id, after: 0)
+                    consecutiveFailures = 0
                     guard !Task.isCancelled, self.invitations[id] != nil else { return }
                     if page.call.status == "ended" || page.call.status == "active" {
                         self.provider.reportCall(with: id, endedAt: Date(), reason: page.call.status == "active" ? .answeredElsewhere : .remoteEnded)
@@ -905,8 +907,10 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
                     try await Task.sleep(for: .seconds(2))
                 } catch {
                     guard !Task.isCancelled else { return }
+                    consecutiveFailures += 1
                     self.errorMessage = String(localized: "来电状态暂时无法更新，接听时会重新确认")
-                    return
+                    if consecutiveFailures >= 3 { break }
+                    try? await Task.sleep(for: .seconds(2))
                 }
             }
             guard let self, !Task.isCancelled, self.invitations[id] != nil else { return }

@@ -21,6 +21,7 @@ final class CloudSyncStore {
     private(set) var requiresDestinationConfirmation = false
     @ObservationIgnored private let records: CallRecordStore
     @ObservationIgnored private let client: CloudSyncClient
+    @ObservationIgnored private let connector = ExternalCallClient()
     @ObservationIgnored private let transfer: CloudRecordTransfer
     @ObservationIgnored private let fileURL: URL
     @ObservationIgnored private var state: State
@@ -103,6 +104,7 @@ final class CloudSyncStore {
     /// Local removal must never become an automatic overwrite of an existing cloud copy.
     /// Reuse the deletion checkpoint: a surviving, different local record requires explicit conflict resolution.
     func prepareLocalDataRemoval(recordIDs: Set<UUID>, category: CallRecordStore.LocalDataCategory) throws {
+        try records.requireCompleteLoading()
         guard !isBusy else { throw TincallError(message: String(localized: "正在同步云端，请完成后再清理本机数据。")) }
         guard !recordIDs.isEmpty else { return }
         var next = state
@@ -200,7 +202,6 @@ final class CloudSyncStore {
         try await self.bind(connection)
         // Retry connector summaries independently of the optional backup document.
         self.status = String(localized: "正在回传尚未上传的通话摘要…")
-        let connector = ExternalCallClient()
         for id in self.records.records.map(\.id) {
             try Task.checkCancellation()
             if automatically { try self.requireAutomaticSync(connection) }
@@ -438,6 +439,7 @@ final class CloudSyncStore {
 
     /// Cloud writes must not race a coordinator or summary task holding an older copy.
     func canSynchronizeRecord(_ id: UUID) -> Bool {
+        guard records.canModifyRecord(id) else { return false }
         guard records.canDeleteRecord?(id) != false else { return false }
         guard let local = records.records.first(where: { $0.id == id }) else { return true }
         return local.isFinished && local.summaryStatus != .pending && local.summaryStatus != .generating &&
@@ -445,6 +447,7 @@ final class CloudSyncStore {
     }
 
     private func requireIdleRecord(_ id: UUID) throws {
+        try records.requireCompleteLoading()
         guard canSynchronizeRecord(id) else {
             throw TincallError(message: String(localized: "此通话仍在进行、生成摘要或保存，请完成后再同步或恢复"))
         }
@@ -494,6 +497,7 @@ final class CloudSyncStore {
     }
 
     private func savePending(_ pending: CloudSyncPending?) throws {
+        try records.requireCompleteLoading()
         var next = state
         next.ledgers[scope!].pending = pending
         try persist(next)
@@ -508,6 +512,7 @@ final class CloudSyncStore {
     }
 
     private func resumePending(_ connection: ConnectionProfile, automatically: Bool = false) async throws {
+        try records.requireCompleteLoading()
         guard var pending = ledger.pending else { return }
         guard !pending.revisionRejected else { throw TincallError(message: String(localized: "上次写入因冲突或权限被拒绝，请先清理未提交的操作，再刷新处理")) }
         if !pending.uploads.isEmpty, !mediaEnabled { throw TincallError(message: String(localized: "上次媒体备份未完成，请重新确认媒体权限后继续")) }
@@ -574,6 +579,7 @@ final class CloudSyncStore {
     }
 
     private func remember(_ remote: CloudSyncRemote) throws {
+        try records.requireCompleteLoading()
         var next = state
         next.ledgers[scope!].checkpoints[remote.id] = CloudSyncCheckpoint(revision: remote.revision, text: remote.record?.call, deleted: remote.deleted)
         try persist(next)
@@ -617,6 +623,11 @@ final class CloudSyncStore {
 
     private func perform(automaticConnection: ConnectionProfile? = nil, _ operation: () async throws -> Void) async {
         guard !isBusy else { return }
+        guard records.storageIssue == nil else {
+            errorMessage = records.storageIssue
+            status = String(localized: "本机记录未能完整读取，云端同步已暂停。")
+            return
+        }
         if let connection = automaticConnection, let retry = state.automaticRetries[connection.id.uuidString],
            retry.endpoint == connection.endpoint?.absoluteString, retry.retryAfter > Date() { return }
         isBusy = true; errorMessage = nil; requiresDestinationConfirmation = false
@@ -624,6 +635,9 @@ final class CloudSyncStore {
         defer { isBusy = false }
         do {
             try Task.checkCancellation()
+            // Missing local files cannot be interpreted as deliberate deletion,
+            // even when the cloud ledger has an older checkpoint or pending write.
+            try records.requireCompleteLoading()
             try await operation()
             if let connection = automaticConnection { try clearAutomaticRetry(connection) }
         }

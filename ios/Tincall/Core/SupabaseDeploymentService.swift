@@ -43,6 +43,7 @@ enum CloudDeploymentStep: String, Codable, CaseIterable, Sendable {
     case serviceSafety = "迁移：授权注册与推送清理"
     case callContext = "迁移：MCP 通话与授权保护"
     case mcpWaitPreferences = "迁移：MCP 等待偏好"
+    case hotPathIndexes = "迁移：通话查询索引"
     case secrets = "写入函数 secrets", function = "部署 Edge Function", vault = "填写 Vault"
     case owner = "取得服务密钥并建立 owner", binding = "绑定手机令牌与 owner", push = "开通官方来电推送", connection = "检查能力并保存连接"
 }
@@ -397,7 +398,8 @@ final class SupabaseDeploymentService {
                                      Migration(version: "202610210003", name: "tincall_message_images", step: .messageImages),
                                      Migration(version: "202610220001", name: "tincall_service_safety", step: .serviceSafety),
                                      Migration(version: "202610220002", name: "tincall_mcp_safety", step: .callContext),
-                                     Migration(version: "202610250001", name: "tincall_mcp_wait_preferences", step: .mcpWaitPreferences)]
+                                     Migration(version: "202610250001", name: "tincall_mcp_wait_preferences", step: .mcpWaitPreferences),
+                                     Migration(version: "202610270001", name: "tincall_hot_path_indexes", step: .hotPathIndexes)]
     private static let versions = Set(migrations.map(\.version))
     private struct History: Decodable { let version: String; let name: String? }
     private static func history(_ client: SupabaseManagementClient, ref: String, pat: String) async throws -> [History] {
@@ -483,6 +485,8 @@ final class SupabaseDeploymentService {
             guardSQL = "if to_regprocedure('public.tincall_oauth(text,jsonb)') is null or to_regclass('public.tincall_devices') is null then raise exception 'tincall_install_conflict'; end if;"
         case .callContext:
             guardSQL = "if to_regprocedure('public.tincall_mcp(text,uuid,text,jsonb)') is null then raise exception 'tincall_install_conflict'; end if;"
+        case .hotPathIndexes:
+            guardSQL = "if to_regclass('public.tincall_messages') is null or to_regclass('public.tincall_jobs') is null or to_regclass('public.tincall_push_jobs') is null or to_regclass('public.tincall_requests') is null then raise exception 'tincall_install_conflict'; end if;"
         case .mcpWaitPreferences:
             guardSQL = "if to_regclass('public.tincall_mcp_roles') is null or exists(select 1 from information_schema.columns where table_schema='public' and table_name='tincall_mcp_roles' and column_name='mcp_wait_timeout_seconds') then raise exception 'tincall_install_conflict'; end if;"
         case .messageImages:

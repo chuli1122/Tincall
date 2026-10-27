@@ -6,11 +6,16 @@ import Foundation
 /// A folder backup of public configuration, contacts, call text and retained audio.
 /// Credentials are never read from Keychain by this format.
 enum GlobalBackup {
-    private struct Manifest: Codable {
+    private struct Manifest: Codable, Sendable {
         let format: String
         let version: Int
         let configuration: LocalConfigurationStore.Configuration
         let recordIDs: [UUID]
+    }
+
+    private struct RecordArchive: Codable, Sendable {
+        let version: Int
+        let record: CallRecord
     }
 
     struct RecordExport: Sendable {
@@ -22,6 +27,15 @@ enum GlobalBackup {
     struct Export: Sendable {
         let manifest: Data
         let records: [RecordExport]
+        let fileWrapper: PreparedFileWrapper
+    }
+
+    /// FileWrapper is a reference type, but the tree is immutable after the
+    /// worker builds it. Keeping it behind this explicit boundary prevents the
+    /// document exporter from rereading media on the main actor.
+    final class PreparedFileWrapper: @unchecked Sendable {
+        let value: FileWrapper
+        init(_ value: FileWrapper) { self.value = value }
     }
 
     struct ImportResult {
@@ -32,29 +46,66 @@ enum GlobalBackup {
         var temporaryCleanupFailed = false
     }
 
-    @MainActor static func export(configuration: LocalConfigurationStore, records: CallRecordStore) throws -> Export {
-        let manifest = try JSONEncoder().encode(Manifest(format: "Tincall", version: 1,
-            configuration: configuration.backupConfiguration(), recordIDs: records.records.map(\.id)))
-        var exports: [RecordExport] = []
-        for record in records.records {
-            let exported = try records.exportRecord(record.id)
-            exports.append(RecordExport(id: record.id, manifest: exported.manifest, media: exported.media))
-        }
-        return Export(manifest: manifest, records: exports)
+    @MainActor static func export(configuration: LocalConfigurationStore, records: CallRecordStore) async throws -> Export {
+        let snapshot = try records.backupSnapshot()
+        let config = try configuration.backupSnapshot()
+        let recordsValue = snapshot.records
+        let media = snapshot.media
+        return try await Task.detached(priority: .userInitiated) {
+            let manifest = try JSONEncoder().encode(Manifest(format: "Tincall", version: 1,
+                configuration: config, recordIDs: recordsValue.map(\.id)))
+            var exports: [RecordExport] = []
+            var calls: [String: FileWrapper] = [:]
+            for record in recordsValue {
+                let recordManifest = try JSONEncoder().encode(RecordArchive(version: 1, record: record))
+                var wrappers: [String: FileWrapper] = [:]
+                for (name, source) in media[record.id] ?? [:] {
+                    let file = try FileWrapper(url: source, options: [])
+                    file.preferredFilename = name
+                    wrappers[name] = file
+                }
+                let recordWrapper = FileWrapper(directoryWithFileWrappers: [
+                    "record.json": FileWrapper(regularFileWithContents: recordManifest),
+                    "media": FileWrapper(directoryWithFileWrappers: wrappers)
+                ])
+                calls[record.id.uuidString] = recordWrapper
+                exports.append(RecordExport(id: record.id, manifest: recordManifest, media: media[record.id] ?? [:]))
+            }
+            let wrapper = FileWrapper(directoryWithFileWrappers: [
+                "backup.json": FileWrapper(regularFileWithContents: manifest),
+                "records": FileWrapper(directoryWithFileWrappers: calls)
+            ])
+            return Export(manifest: manifest, records: exports, fileWrapper: PreparedFileWrapper(wrapper))
+        }.value
     }
 
-    @MainActor static func importFolder(_ folder: URL, configuration: LocalConfigurationStore, records: CallRecordStore) throws -> ImportResult {
+    @MainActor static func importFolder(_ folder: URL, configuration: LocalConfigurationStore, records: CallRecordStore) async throws -> ImportResult {
         let fm = FileManager.default
         try checkDirectory(folder)
-        let manifestURL = folder.appendingPathComponent("backup.json")
-        let manifestSize = try fileSize(manifestURL)
-        let manifest: Manifest
-        do { manifest = try JSONDecoder().decode(Manifest.self, from: Data(contentsOf: manifestURL)) }
-        catch { throw TincallError(message: String(localized: "不是有效的Tincall全局备份文件夹")) }
+        let source = folder
+        let stagedInput = try await Task.detached(priority: .userInitiated) {
+            let manifestURL = source.appendingPathComponent("backup.json")
+            let manifestData = try Data(contentsOf: manifestURL, options: .mappedIfSafe)
+            let manifest = try JSONDecoder().decode(Manifest.self, from: manifestData)
+            let staging = FileManager.default.temporaryDirectory.appendingPathComponent("TincallImportInput-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.copyItem(at: source, to: staging)
+            return (manifestData, manifest, staging)
+        }.value
+        defer { try? fm.removeItem(at: stagedInput.2) }
+        let manifestSize = stagedInput.0.count
+        let manifest = stagedInput.1
         guard manifest.format == "Tincall", manifest.version == 1 else { throw TincallError(message: String(localized: "不支持此全局备份版本")) }
         guard Set(manifest.recordIDs).count == manifest.recordIDs.count else { throw TincallError(message: String(localized: "全局备份记录清单无效")) }
         let plan = try configuration.prepareImport(manifest.configuration)
-        let recordDirectory = folder.appendingPathComponent("records", isDirectory: true)
+        let expectedConfiguration = try configuration.backupSnapshot()
+        let preparedConfiguration = try await Task.detached(priority: .userInitiated) {
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("TincallImportConfiguration-\(UUID().uuidString).json")
+            let data = try JSONEncoder().encode(plan.configuration)
+            try data.write(to: url, options: .atomic)
+            return url
+        }.value
+        defer { try? fm.removeItem(at: preparedConfiguration) }
+        let recordDirectory = stagedInput.2.appendingPathComponent("records", isDirectory: true)
         try checkDirectory(recordDirectory)
         let children = try fm.contentsOfDirectory(at: recordDirectory, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
         guard Set(children.map(\.lastPathComponent)) == Set(manifest.recordIDs.map(\.uuidString)), children.count == manifest.recordIDs.count else {
@@ -76,7 +127,7 @@ enum GlobalBackup {
         let staging = fm.temporaryDirectory.appendingPathComponent("TincallImport-\(UUID().uuidString)", isDirectory: true)
         var installed: [CallRecord] = []
         do {
-            let staged = try CallRecordStore(directory: staging)
+            let staged = try CallRecordStore(directory: staging, strictLoading: true)
             for package in packages {
                 let imported = try staged.importRecord(from: package)
                 guard imported.imported else { continue }
@@ -86,7 +137,7 @@ enum GlobalBackup {
                 try staged.save(record)
             }
             installed = try records.installImportedRecords(from: staged, deduplicate: true)
-            do { try configuration.commitImport(plan) }
+            do { try configuration.commitImport(plan, preparedFile: preparedConfiguration, expected: expectedConfiguration) }
             catch {
                 do { try records.rollbackImportedRecords(installed) }
                 catch { throw TincallError(message: String(localized: "配置导入未保存，部分新记录清理失败；原有数据保留。")) }

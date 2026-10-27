@@ -23,6 +23,19 @@ const request = (path, value, token = credential) => new Request(`https://synthe
   method: 'POST', headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'}, body: JSON.stringify(value)
 });
 
+test('connected activity rejects invalid gateway receipts as an upstream failure',async t=>{
+  const directory=mkdtempSync(join(tmpdir(),'tincall-activity-receipt-'));
+  const store=createSQLiteStore({clients:[{token:credential,owner_id:owner}]},join(directory,'calls.sqlite'));
+  t.after(()=>{store.close();rmSync(directory,{recursive:true,force:true});});
+  const callID=crypto.randomUUID();
+  await store.command(owner,'call.create',{request_id:crypto.randomUUID(),call_id:callID,contact_id:'synthetic',source:'independent'});
+  for(const body of ['not JSON','null','{}']){
+    const connector=createConnector({store,config:{pushURL:'https://example.invalid',pushToken:credential},fetcher:async()=>new Response(body)});
+    const response=await connector.handle(request(`/calls/${callID}/activity`,{request_id:crypto.randomUUID(),device_id:crypto.randomUUID()}));
+    assert.equal(response.status,502);assert.equal((await response.json()).error.code,'activity_push_failed');
+  }
+});
+
 test('connected activity APNs carries a display name and a localized alert without sound', async () => {
   const callID = crypto.randomUUID();
   const contactID = crypto.randomUUID();

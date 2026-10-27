@@ -24,7 +24,7 @@ final class LocalConfigurationStore {
     @ObservationIgnored private var refreshContactsAgain = false
     private let fileURL: URL
 
-    struct Configuration: Codable, Sendable {
+    struct Configuration: Codable, Equatable, Sendable {
         var connections: [ConnectionProfile]
         var roles: [CallRole]
         var retention: AudioRetention
@@ -277,7 +277,7 @@ final class LocalConfigurationStore {
         try persist(connections: connections, roles: next, retention: retention, defaultSTTConnectionID: defaultSTTConnectionID)
     }
 
-    struct ImportPlan {
+    struct ImportPlan: Sendable {
         let configuration: Configuration
         let roleIDs: [UUID: UUID]
         let connectionIDs: [UUID: UUID]
@@ -297,6 +297,12 @@ final class LocalConfigurationStore {
             throw TincallError(message: String(localized: "无法读取本机配置文件大小。"))
         }
         return Int64(size)
+    }
+
+    var backupFileURL: URL { fileURL }
+
+    func backupSnapshot() throws -> Configuration {
+        backupConfiguration()
     }
 
     /// Merge portable public configuration. Existing IDs and their Keychain items are never overwritten.
@@ -378,6 +384,23 @@ final class LocalConfigurationStore {
                     speechRecognitionCorrections: value.speechRecognitionCorrections)
     }
 
+    /// The caller encoded this configuration off the main actor and rechecked
+    /// its baseline before entering this short, non-suspending commit.
+    func commitImport(_ plan: ImportPlan, preparedFile: URL, expected: Configuration) throws {
+        guard backupConfiguration() == expected else {
+            throw TincallError(message: String(localized: "本机配置在导入期间发生变化，请重新导入以保护最新编辑。"))
+        }
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            guard try fileURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                throw TincallError(message: String(localized: "本机配置文件不可写"))
+            }
+            _ = try FileManager.default.replaceItemAt(fileURL, withItemAt: preparedFile)
+        } else {
+            try FileManager.default.moveItem(at: preparedFile, to: fileURL)
+        }
+        apply(plan.configuration)
+    }
+
     private func validateRole(_ role: CallRole, connections: [ConnectionProfile]) throws {
         guard !role.displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw TincallError(message: String(localized: "请填写联系人姓名")) }
         if let id = role.modelConnectionID, !connections.contains(where: { $0.id == id && $0.provider.isLanguageModel }) { throw TincallError(message: String(localized: "请选择有效的模型连接")) }
@@ -394,7 +417,13 @@ final class LocalConfigurationStore {
         let data = try JSONEncoder().encode(Configuration(connections: connections, roles: roles, retention: retention, defaultSTTConnectionID: defaultSTTConnectionID,
                                                         userProfile: userProfile, speechRecognitionCorrections: corrections))
         try data.write(to: fileURL, options: .atomic)
-        self.connections = connections
+        apply(Configuration(connections: connections, roles: roles, retention: retention, defaultSTTConnectionID: defaultSTTConnectionID,
+                            userProfile: userProfile, speechRecognitionCorrections: corrections))
+    }
+
+    private func apply(_ configuration: Configuration) {
+        let roles = configuration.roles
+        self.connections = configuration.connections
         contactSyncIssues = contactSyncIssues.filter { id, _ in
             roles.contains {
                 $0.id == id && $0.linkedContact != nil
@@ -402,9 +431,9 @@ final class LocalConfigurationStore {
             }
         }
         self.roles = roles
-        self.retention = retention
-        self.defaultSTTConnectionID = defaultSTTConnectionID
-        self.userProfile = userProfile
-        self.speechRecognitionCorrections = corrections
+        self.retention = configuration.retention
+        self.defaultSTTConnectionID = configuration.defaultSTTConnectionID
+        self.userProfile = configuration.userProfile ?? LocalUserProfile()
+        self.speechRecognitionCorrections = configuration.speechRecognitionCorrections ?? []
     }
 }

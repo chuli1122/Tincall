@@ -7,17 +7,46 @@ import Observation
 @MainActor @Observable
 final class CallRecordStore {
     private(set) var records: [CallRecord] = []
+    private(set) var storageIssue: String?
+    private(set) var unavailableRecordIDs: Set<UUID> = []
+    private(set) var hasUnidentifiedUnavailableRecords = false
     @ObservationIgnored var canDeleteRecord: ((UUID) -> Bool)?
     @ObservationIgnored var onDeleteRecord: ((UUID) -> Void)?
     var finishedRecords: [CallRecord] { records.filter(\.isFinished) }
     private let directory: URL
     let mediaDirectory: URL
     private let fileManager = FileManager.default
+    private let strictLoading: Bool
 
     struct StorageUsage: Sendable {
         var textBytes: Int64 = 0
         var imageBytes: Int64 = 0
         var audioBytes: Int64 = 0
+    }
+
+    struct BackupSnapshot: Sendable {
+        let records: [CallRecord]
+        let media: [UUID: [String: URL]]
+    }
+
+    /// Capture validated value data and source URLs on the actor. Callers may
+    /// encode/copy these immutable values on a worker without touching the store.
+    func backupSnapshot() throws -> BackupSnapshot {
+        try requireCompleteLoading()
+        var media: [UUID: [String: URL]] = [:]
+        for record in records {
+            try requireAvailableRecord(record.id)
+            let audio = try record.audioAssets.map { ($0, try audioURL($0, recordID: record.id)) }
+            let images = try record.messages.flatMap { message in
+                try (message.images ?? []).map { ($0, try imageURL($0, recordID: record.id, messageID: message.id)) }
+            }
+            try checkMedia(audio.map { $0.1 } + images.map { $0.1 })
+            var files: [String: URL] = [:]
+            for (asset, url) in audio { files[archiveAudioName(asset)] = url }
+            for (asset, url) in images { files["\(asset.id.uuidString).\(url.pathExtension)"] = url }
+            media[record.id] = files
+        }
+        return BackupSnapshot(records: records, media: media)
     }
 
     enum LocalDataCategory: CaseIterable {
@@ -33,6 +62,7 @@ final class CallRecordStore {
     }
 
     func recordsForCleanup(_ category: LocalDataCategory) throws -> [CallRecord] {
+        try requireCompleteLoading()
         let targets = records.filter(category.contains)
         for record in targets {
             guard record.isFinished else { throw TincallError(message: String(localized: "请结束通话后再清理本机数据。")) }
@@ -90,6 +120,7 @@ final class CallRecordStore {
 
     /// Read file metadata only; media contents are not loaded to calculate usage.
     func storageUsage() throws -> StorageUsage {
+        try requireCompleteLoading()
         var usage = StorageUsage()
         for record in records {
             usage.textBytes += Int64(try checkedFileSize(recordURL(record.id)))
@@ -118,26 +149,70 @@ final class CallRecordStore {
         var record: CallRecord
     }
 
-    init(directory: URL? = nil) throws {
+    init(directory: URL? = nil, strictLoading: Bool = false) throws {
         let root = try directory ?? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("Tincall/Records", isDirectory: true)
         self.directory = root
+        self.strictLoading = strictLoading
         mediaDirectory = root.appendingPathComponent("media", isDirectory: true)
         try fileManager.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
         try reload()
     }
 
     func reload() throws {
-        let urls = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-        let loaded = try urls.filter { $0.pathExtension == "json" }.map { url in
-            let record = try JSONDecoder().decode(CallRecord.self, from: Data(contentsOf: url))
-            guard url.lastPathComponent == "\(record.id.uuidString).json" else { throw TincallError(message: String(localized: "通话记录标识不匹配")) }
-            try validate(record)
-            return record
+        let urls: [URL]
+        do { urls = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) }
+        catch {
+            // A failed enumeration cannot establish which records are absent.
+            hasUnidentifiedUnavailableRecords = true
+            storageIssue = String(localized: "通话记录目录未能读取，原文件已保留。记录写入和云端同步已暂停，请稍后重试。")
+            throw error
         }
+        var loaded: [CallRecord] = []
+        var unavailable: Set<UUID> = []
+        var unidentified = false
+        var failures = 0
+        for url in urls where url.pathExtension.lowercased() == "json" {
+            var decodedID: UUID?
+            do {
+                let record = try JSONDecoder().decode(CallRecord.self, from: Data(contentsOf: url))
+                decodedID = record.id
+                guard url.lastPathComponent == "\(record.id.uuidString).json" else { throw TincallError(message: String(localized: "通话记录标识不匹配")) }
+                try validate(record)
+                loaded.append(record)
+            } catch {
+                if strictLoading { throw error }
+                // Permission, protected-data and newer-schema failures are unavailable,
+                // not proof of corruption. Never rename, rewrite or remove the file.
+                failures += 1
+                if let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent) {
+                    unavailable.insert(id)
+                    if let decodedID, decodedID != id { unidentified = true }
+                } else { unidentified = true }
+            }
+        }
+        unavailableRecordIDs = unavailable
+        hasUnidentifiedUnavailableRecords = unidentified
+        storageIssue = failures == 0 ? nil : String(localized: "有 \(failures) 个通话记录文件未能读取，原文件已保留。其他可读记录仍可查看；完整备份、导入和清理暂不可用。")
+        if unidentified { storageIssue = (storageIssue ?? "") + String(localized: "存在无法确定归属的记录文件，记录写入和云端同步已暂停。") }
         records = loaded.sorted { $0.startedAt > $1.startedAt }
     }
 
+    func canModifyRecord(_ id: UUID) -> Bool {
+        !hasUnidentifiedUnavailableRecords && !unavailableRecordIDs.contains(id)
+    }
+
+    func requireCompleteLoading() throws {
+        if let storageIssue { throw TincallError(message: storageIssue) }
+    }
+
+    private func requireAvailableRecord(_ id: UUID) throws {
+        guard canModifyRecord(id) else {
+            throw TincallError(message: String(localized: "此记录的本机文件未能完整读取，原文件已保留。请先恢复本机文件后再修改或同步。"))
+        }
+    }
+
     func save(_ record: CallRecord) throws {
+        try requireAvailableRecord(record.id)
         try validate(record)
         let data = try JSONEncoder().encode(record)
         try data.write(to: recordURL(record.id), options: .atomic)
@@ -148,6 +223,9 @@ final class CallRecordStore {
 
     /// Run once at app launch, never during reload or staged import. The real end time is unknown.
     func recoverUnfinishedCalls() throws {
+        // An unidentified file may belong to any call. Keep readable history visible
+        // without rewriting a record while its ownership is uncertain.
+        guard !hasUnidentifiedUnavailableRecords else { return }
         for var record in records where !record.isFinished {
             record.endedAbnormally = true
             if record.externalCallID == nil {
@@ -164,6 +242,7 @@ final class CallRecordStore {
     }
 
     func delete(recordID: UUID) throws {
+        try requireAvailableRecord(recordID)
         guard let record = records.first(where: { $0.id == recordID }) else { return }
         try requireDeletable(record)
         let manifest = recordURL(recordID)
@@ -190,6 +269,7 @@ final class CallRecordStore {
 
     private func requireDeletable(_ record: CallRecord) throws {
         let recordID = record.id
+        try requireAvailableRecord(recordID)
         guard canDeleteRecord?(recordID) != false else { throw TincallError(message: String(localized: "通话仍在保存，请完成保存后再删除。")) }
         guard record.summaryStatus != .pending, record.summaryStatus != .generating,
               record.externalPendingControl == nil, record.externalPendingInput == nil,
@@ -201,6 +281,7 @@ final class CallRecordStore {
     /// Save the current message first. Early audio must wait in the coordinator until then.
     /// Return only after durable copy AND atomic index save. Caller may then remove source.
     func saveAudio(recordID: UUID, segment: VoiceAudioSegment) throws -> CallAudioAsset {
+        try requireAvailableRecord(recordID)
         guard var record = records.first(where: { $0.id == recordID }) else { throw TincallError(message: String(localized: "请先保存通话文字，再保存音频")) }
         guard segment.segmentIndex >= 0, record.messages.contains(where: { $0.id == segment.messageID }) else { throw TincallError(message: String(localized: "语音分段与通话消息不匹配")) }
         if let existing = record.audioAssets.first(where: { $0.id == segment.id }) {
@@ -225,6 +306,7 @@ final class CallRecordStore {
 
     /// Stage durable JPEGs before the coordinator atomically accepts the whole message.
     func saveImages(recordID: UUID, messageID: UUID, images: [Data]) throws -> [CallImageAsset] {
+        try requireAvailableRecord(recordID)
         guard records.contains(where: { $0.id == recordID }), !images.isEmpty, images.count <= 4,
               images.allSatisfy({ !$0.isEmpty }) else { throw TincallError(message: String(localized: "无法保存消息图片")) }
         for data in images { try ConnectorMessageImage.validate(data, mimeType: "image/jpeg") }
@@ -250,6 +332,7 @@ final class CallRecordStore {
 
     /// Install immutable downloaded media before publishing its record index.
     func installImage(_ data: Data, asset: CallImageAsset, recordID: UUID, messageID: UUID) throws {
+        try requireAvailableRecord(recordID)
         try ConnectorMessageImage.validate(data, mimeType: asset.mimeType)
         let destination = try imageURL(asset, recordID: recordID, messageID: messageID)
         if fileManager.fileExists(atPath: destination.path) {
@@ -284,6 +367,7 @@ final class CallRecordStore {
 
     /// A portable single-call backup, including only audio already selected for retention.
     func exportRecord(_ id: UUID) throws -> (manifest: Data, media: [String: URL]) {
+        try requireAvailableRecord(id)
         guard let record = records.first(where: { $0.id == id }) else { throw TincallError(message: String(localized: "找不到通话记录")) }
         let sources = try record.audioAssets.map { ($0, try audioURL($0, recordID: id)) }
         let imageSources = try record.messages.flatMap { message in
@@ -307,6 +391,7 @@ final class CallRecordStore {
     /// Existing calls keep their local text, summary and audio. Never writes an archive-supplied path.
     @discardableResult
     func importRecord(from package: URL, asIndependentCopy: Bool = false) throws -> ImportResult {
+        try requireCompleteLoading()
         guard package.isFileURL else { throw TincallError(message: String(localized: "请选择本地通话备份目录")) }
         let packageInfo = try package.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard packageInfo.isDirectory == true, packageInfo.isSymbolicLink != true else { throw TincallError(message: String(localized: "请选择非符号链接的备份目录")) }
@@ -392,6 +477,8 @@ final class CallRecordStore {
     /// Install only newly staged calls. Rollback never removes an existing call.
     @discardableResult
     func installImportedRecords(from staged: CallRecordStore, deduplicate: Bool = false) throws -> [CallRecord] {
+        try requireCompleteLoading()
+        try staged.requireCompleteLoading()
         var incoming: [CallRecord] = []
         for record in staged.records {
             if deduplicate, matchingRecord(record, in: records + incoming) != nil { continue }
@@ -445,6 +532,7 @@ final class CallRecordStore {
 
     /// Undo the newly installed batch if configuration commit fails.
     func rollbackImportedRecords(_ incoming: [CallRecord]) throws {
+        for record in incoming { try requireAvailableRecord(record.id) }
         for record in incoming {
             try fileManager.removeItem(at: recordURL(record.id))
             records.removeAll { $0.id == record.id }

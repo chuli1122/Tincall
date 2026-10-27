@@ -70,11 +70,17 @@ struct GlobalBackupScreen: View {
             Group {
                 Section {
                     Button {
-                        guard !isCallActive else { return }
-                        do {
-                            document = GlobalBackupDocument(export: try GlobalBackup.export(configuration: configuration, records: records))
-                            isExporting = true
-                        } catch { message = String(localized: "导出失败：\(error.localizedDescription)") }
+                        guard !isCallActive, !isWorking, !isExporting, !isImporting else { return }
+                        isWorking = true
+                        Task {
+                            defer { isWorking = false }
+                            do {
+                                let value = try await GlobalBackup.export(configuration: configuration, records: records)
+                                guard !Task.isCancelled else { return }
+                                document = GlobalBackupDocument(export: value)
+                                isExporting = true
+                            } catch { message = String(localized: "导出失败：\(error.localizedDescription)") }
+                        }
                     } label: { SettingsActionLabel(title: String(localized: "导出备份文件夹"), symbol: "square.and.arrow.up", detail: String(localized: "保存联系人、通话记录与连接配置")) }
                     .buttonStyle(.plain)
                     Button { isImporting = true } label: {
@@ -110,16 +116,22 @@ struct GlobalBackupScreen: View {
         .fileImporter(isPresented: $isImporting, allowedContentTypes: [.folder]) { result in
             do {
                 let url = try result.get()
-                guard !isCallActive else { throw TincallError(message: String(localized: "请结束通话后再导入。")) }
+                guard !isCallActive, !isWorking else { return }
                 let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
                 isWorking = true
-                defer { isWorking = false }
-                let imported = try GlobalBackup.importFolder(url, configuration: configuration, records: records)
-                message = String(localized: "已导入\(imported.contacts)位联系人、\(imported.connections)个连接和\(imported.records)条记录。已有数据保留。")
-                if imported.skippedRecords > 0 { message! += String(localized: "已跳过\(imported.skippedRecords)条已有通话。") }
-                if imported.temporaryCleanupFailed { message! += String(localized: "临时副本清理失败。") }
-                refreshStorageUsage()
+                Task {
+                    defer {
+                        if accessed { url.stopAccessingSecurityScopedResource() }
+                        isWorking = false
+                    }
+                    do {
+                        let imported = try await GlobalBackup.importFolder(url, configuration: configuration, records: records)
+                        message = String(localized: "已导入\(imported.contacts)位联系人、\(imported.connections)个连接和\(imported.records)条记录。已有数据保留。")
+                        if imported.skippedRecords > 0 { message! += String(localized: "已跳过\(imported.skippedRecords)条已有通话。") }
+                        if imported.temporaryCleanupFailed { message! += String(localized: "临时副本清理失败。") }
+                        refreshStorageUsage()
+                    } catch { if !isCancellation(error) { message = String(localized: "导入失败：\(error.localizedDescription)") } }
+                }
             } catch { if !isCancellation(error) { message = String(localized: "导入失败：\(error.localizedDescription)") } }
         }
         .alert("本机数据与备份", isPresented: Binding(get: { message != nil }, set: { if !$0 { message = nil } })) {
@@ -231,13 +243,6 @@ struct GlobalBackupDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        var calls: [String: FileWrapper] = [:]
-        for record in export.records {
-            calls[record.id.uuidString] = try CallBackupDocument(manifest: record.manifest, media: record.media).fileWrapper(configuration: configuration)
-        }
-        return FileWrapper(directoryWithFileWrappers: [
-            "backup.json": FileWrapper(regularFileWithContents: export.manifest),
-            "records": FileWrapper(directoryWithFileWrappers: calls)
-        ])
+        export.fileWrapper.value
     }
 }

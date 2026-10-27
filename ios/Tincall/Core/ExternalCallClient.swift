@@ -244,6 +244,12 @@ final class ExternalCallClient {
         incomingSession = URLSession(configuration: incomingConfiguration, delegate: NoConnectorRedirects(), delegateQueue: nil)
     }
 
+    deinit {
+        session.invalidateAndCancel()
+        eventsSession.invalidateAndCancel()
+        incomingSession.invalidateAndCancel()
+    }
+
     func validate(_ connection: ConnectionProfile, tokenOverride: String? = nil, allowDeviceRemoval: Bool = false) throws {
         if !allowDeviceRemoval || !DataSharingConsent.isCleanupAllowed(connection) { try DataSharingConsent.require(connection) }
         guard connection.provider == .genericConnector,

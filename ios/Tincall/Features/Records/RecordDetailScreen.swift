@@ -508,11 +508,11 @@ struct RecordDetailScreen: View {
 
     private func summaryTitle(_ status: SummaryStatus) -> String {
         switch status {
-        case .notRequested: "未生成摘要"
-        case .pending: "摘要待生成"
-        case .generating: "摘要生成中"
-        case .completed: "通话摘要"
-        case .failed: "摘要失败，原记录已保留"
+        case .notRequested: String(localized: "未生成摘要")
+        case .pending: String(localized: "摘要待生成")
+        case .generating: String(localized: "摘要生成中")
+        case .completed: String(localized: "通话摘要")
+        case .failed: String(localized: "摘要失败，原记录已保留")
         }
     }
 }

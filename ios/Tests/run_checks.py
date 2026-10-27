@@ -83,7 +83,7 @@ VARIANTS = {
         "--stt-switch-only", "--mcp-queue-only", "--missed-call", "--mcp-message-only", "--mcp-end-only",
         "--connection-timing-only", "--redial-recovery-only", "--network-recovery-only"],
     "IncomingForegroundChecks": ["--caller-handle", "--connection-removal", "--bindings", "--foreground-handoff",
-        "--activity-after-answer", "--missed-call", "--answer", "--outgoing", "--consent", "--failure-guidance"],
+        "--activity-after-answer", "--missed-call", "--ring-recovery", "--answer", "--outgoing", "--consent", "--failure-guidance"],
     "MCPSummaryUploadChecks": ["--verify-restart"],
     "SpeechEmptyInputChecks": ["--redirects-only"],
 }

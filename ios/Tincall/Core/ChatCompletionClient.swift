@@ -23,6 +23,10 @@ final class ChatCompletionClient {
         session = URLSession(configuration: configuration, delegate: NoModelRedirects(), delegateQueue: nil)
     }
 
+    deinit {
+        session.invalidateAndCancel()
+    }
+
     func validate(_ connection: ConnectionProfile) throws {
         try DataSharingConsent.require(connection)
         _ = try ModelRequestCodec.resolvedEndpoint(connection: connection)

@@ -5,7 +5,7 @@ import Foundation
 
 @main
 struct BackupImportChecks {
-    @MainActor static func main() throws {
+    @MainActor static func main() async throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("TincallBackupChecks-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: root) }
@@ -20,7 +20,7 @@ struct BackupImportChecks {
         try writeSingle(source, recordID: a.id, package: single)
         let b = try makeRecord(source, date: date, text: "Different call, identical timestamp", audio: audio)
         let global = root.appendingPathComponent("global")
-        try writeGlobal(configuration: sourceConfiguration, records: source, folder: global)
+        try await writeGlobal(configuration: sourceConfiguration, records: source, folder: global)
 
         let targetDirectory = root.appendingPathComponent("target-records")
         let target = try CallRecordStore(directory: targetDirectory)
@@ -32,12 +32,12 @@ struct BackupImportChecks {
         let reopened = try CallRecordStore(directory: targetDirectory)
         let existing = reopened.records[0]
         let configuration = try LocalConfigurationStore(directory: root.appendingPathComponent("target-configuration"))
-        let importedGlobal = try GlobalBackup.importFolder(global, configuration: configuration, records: reopened)
+        let importedGlobal = try await GlobalBackup.importFolder(global, configuration: configuration, records: reopened)
         precondition(importedGlobal.records == 1 && importedGlobal.skippedRecords == 1 && reopened.records.count == 2)
         precondition(reopened.records.first(where: { $0.id == first.record.id }) == existing)
         precondition(Set(reopened.records.compactMap(\.sourceRecordID)) == Set([a.id, b.id]))
         try checkAudio(reopened, expected: bytes)
-        let again = try GlobalBackup.importFolder(global, configuration: configuration, records: reopened)
+        let again = try await GlobalBackup.importFolder(global, configuration: configuration, records: reopened)
         precondition(again.records == 0 && again.skippedRecords == 2 && reopened.records.count == 2)
         let afterGlobal = try reopened.importRecord(from: single)
         precondition(!afterGlobal.imported && afterGlobal.record == existing)
@@ -63,7 +63,7 @@ struct BackupImportChecks {
         try legacy.save(legacyRecord)
         let matchedLegacy = try legacy.importRecord(from: single)
         precondition(!matchedLegacy.imported && matchedLegacy.record == legacyRecord && legacy.records.count == 1)
-        let legacyGlobal = try GlobalBackup.importFolder(global,
+        let legacyGlobal = try await GlobalBackup.importFolder(global,
             configuration: LocalConfigurationStore(directory: root.appendingPathComponent("legacy-configuration")), records: legacy)
         precondition(legacyGlobal.records == 1 && legacyGlobal.skippedRecords == 1)
         precondition(legacy.records.contains(legacyRecord))
@@ -88,7 +88,7 @@ struct BackupImportChecks {
         let failingConfiguration = try LocalConfigurationStore(directory: configDirectory)
         try fm.createDirectory(at: configDirectory.appendingPathComponent("configuration.json"), withIntermediateDirectories: false)
         do {
-            _ = try GlobalBackup.importFolder(global, configuration: failingConfiguration, records: rollbackRecords)
+            _ = try await GlobalBackup.importFolder(global, configuration: failingConfiguration, records: rollbackRecords)
             preconditionFailure("Expected configuration commit failure")
         } catch { }
         precondition(rollbackRecords.records == [preserved])
@@ -108,11 +108,11 @@ struct BackupImportChecks {
         } catch is TincallError { }
         precondition(restarted.records.count == 3)
         try checkAudio(restarted, expected: bytes)
-        try checkFormerLimits(root: root)
+        try await checkFormerLimits(root: root)
         print("PASS: single then global/repeated imports are idempotent after restart; stable UUIDs survive re-export; local edits/audio remain; equal timestamps stay distinct; legacy UUID fallback and independent cloud copies work; failed global commit rolls back only new records; duplicate archives retain safety checks")
     }
 
-    @MainActor private static func checkFormerLimits(root: URL) throws {
+    @MainActor private static func checkFormerLimits(root: URL) async throws {
         let fm = FileManager.default
         let configuration = try LocalConfigurationStore(directory: root.appendingPathComponent("large-configuration"))
         let emptyConfigBytes = try configuration.storageBytes()
@@ -143,10 +143,10 @@ struct BackupImportChecks {
         let singleUsage = try singleTarget.storageUsage()
         precondition(singleUsage.textBytes > 8 * 1024 * 1024 && singleUsage.audioBytes == Int64(audioSize))
         let folder = root.appendingPathComponent("large-global")
-        try writeGlobal(configuration: configuration, records: records, folder: folder)
+        try await writeGlobal(configuration: configuration, records: records, folder: folder)
         let targetConfiguration = try LocalConfigurationStore(directory: root.appendingPathComponent("large-target-configuration"))
         let target = try CallRecordStore(directory: root.appendingPathComponent("large-global-target"))
-        let result = try GlobalBackup.importFolder(folder, configuration: targetConfiguration, records: target)
+        let result = try await GlobalBackup.importFolder(folder, configuration: targetConfiguration, records: target)
         precondition(result.contacts == 1 && result.records == 1)
         precondition(targetConfiguration.roles[0].systemPrompt == role.systemPrompt)
         precondition(target.records[0].messages.count == messages.count && target.records[0].messages[0].text == messages[0].text)
@@ -171,8 +171,8 @@ struct BackupImportChecks {
         for (name, source) in export.media { try FileManager.default.copyItem(at: source, to: media.appendingPathComponent(name)) }
     }
 
-    @MainActor private static func writeGlobal(configuration: LocalConfigurationStore, records: CallRecordStore, folder: URL) throws {
-        let export = try GlobalBackup.export(configuration: configuration, records: records)
+    @MainActor private static func writeGlobal(configuration: LocalConfigurationStore, records: CallRecordStore, folder: URL) async throws {
+        let export = try await GlobalBackup.export(configuration: configuration, records: records)
         let recordDirectory = folder.appendingPathComponent("records")
         try FileManager.default.createDirectory(at: recordDirectory, withIntermediateDirectories: true)
         try export.manifest.write(to: folder.appendingPathComponent("backup.json"))

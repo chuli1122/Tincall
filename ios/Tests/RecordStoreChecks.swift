@@ -9,6 +9,7 @@ struct RecordStoreChecks {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("TincallRecordChecks-\(UUID().uuidString)")
         defer { try? fm.removeItem(at: root) }
+        try checkUnreadableRecords(root.appendingPathComponent("unreadable"))
         let store = try CallRecordStore(directory: root.appendingPathComponent("records"))
         let emptyUsage = try store.storageUsage()
         precondition(emptyUsage.textBytes == 0 && emptyUsage.imageBytes == 0 && emptyUsage.audioBytes == 0)
@@ -103,6 +104,85 @@ struct RecordStoreChecks {
         try checkInterruptedRecovery(root.appendingPathComponent("recovery"))
         try checkLocalCleanup(root.appendingPathComponent("cleanup"))
         print("PASS: import detaches remote and queued state; media and summary round trip; deletion blocks pending controls and queued text; file sizes reflect text, images and retained audio before and after deletion")
+    }
+
+    @MainActor private static func checkUnreadableRecords(_ directory: URL) throws {
+        let original = try CallRecordStore(directory: directory)
+        let good = CallRecord(roleID: UUID(), roleName: "Synthetic readable", startedAt: Date().addingTimeInterval(-10), endedAt: Date())
+        let damaged = CallRecord(roleID: UUID(), roleName: "Synthetic unreadable", startedAt: Date().addingTimeInterval(-10), endedAt: Date())
+        try original.save(good)
+        try original.save(damaged)
+        let damagedURL = directory.appendingPathComponent("\(damaged.id.uuidString).json")
+        let bytes = Data("{truncated synthetic record".utf8)
+        try bytes.write(to: damagedURL)
+        let reopened = try CallRecordStore(directory: directory)
+        precondition(reopened.records == [good], "One unreadable record must not hide healthy history")
+        let retained = try Data(contentsOf: damagedURL)
+        precondition(retained == bytes, "Unreadable records must remain untouched")
+        precondition(reopened.storageIssue != nil && reopened.unavailableRecordIDs == [damaged.id])
+        precondition(reopened.canModifyRecord(good.id) && !reopened.canModifyRecord(damaged.id))
+        try expectUnavailable { try reopened.save(damaged) }
+        try expectUnavailable { try reopened.delete(recordID: damaged.id) }
+        try expectUnavailable { _ = try reopened.exportRecord(damaged.id) }
+        try expectUnavailable { try reopened.requireCompleteLoading() }
+        try expectUnavailable { _ = try reopened.storageUsage() }
+        try expectUnavailable { try reopened.clearLocalData(.records) }
+        let readableExport = try reopened.exportRecord(good.id)
+        let package = directory.appendingPathComponent("package")
+        try FileManager.default.createDirectory(at: package.appendingPathComponent("media"), withIntermediateDirectories: true)
+        try readableExport.manifest.write(to: package.appendingPathComponent("record.json"))
+        try expectUnavailable { _ = try reopened.importRecord(from: package) }
+        let clean = try CallRecordStore(directory: directory.appendingPathComponent("clean"))
+        try expectUnavailable { _ = try clean.installImportedRecords(from: reopened) }
+        do {
+            _ = try CallRecordStore(directory: directory, strictLoading: true)
+            preconditionFailure("Staging must not accept a partially readable store")
+        } catch { }
+        let stillRetained = try Data(contentsOf: damagedURL)
+        precondition(stillRetained == bytes && reopened.records == [good] && clean.records.isEmpty)
+
+        // Valid JSON with a newer enum is unavailable, not evidence of corruption.
+        var future = try JSONSerialization.jsonObject(with: JSONEncoder().encode(damaged)) as! [String: Any]
+        future["summaryStatus"] = "synthetic_future_status"
+        let futureBytes = try JSONSerialization.data(withJSONObject: future)
+        try futureBytes.write(to: damagedURL)
+        try reopened.reload()
+        precondition(reopened.records == [good] && reopened.unavailableRecordIDs == [damaged.id])
+        let retainedFuture = try Data(contentsOf: damagedURL)
+        precondition(retainedFuture == futureBytes)
+
+        // A read failure is kept in place too, rather than renamed as corrupt.
+        try FileManager.default.removeItem(at: damagedURL)
+        try FileManager.default.createDirectory(at: damagedURL, withIntermediateDirectories: false)
+        try reopened.reload()
+        precondition(reopened.records == [good] && reopened.unavailableRecordIDs == [damaged.id])
+        try expectUnavailable { try reopened.save(damaged) }
+        try FileManager.default.removeItem(at: damagedURL)
+        try JSONEncoder().encode(damaged).write(to: damagedURL)
+        try reopened.reload()
+        precondition(reopened.storageIssue == nil && reopened.unavailableRecordIDs.isEmpty)
+
+        var active = good
+        active.endedAt = nil
+        try reopened.save(active)
+        let activeURL = directory.appendingPathComponent("\(active.id.uuidString).json")
+        let activeBytes = try Data(contentsOf: activeURL)
+        let unknown = directory.appendingPathComponent("unidentified.json")
+        try bytes.write(to: unknown)
+        try reopened.reload()
+        precondition(reopened.hasUnidentifiedUnavailableRecords && !reopened.canModifyRecord(active.id))
+        try reopened.recoverUnfinishedCalls()
+        try expectUnavailable { try reopened.save(good) }
+        try expectUnavailable { try reopened.delete(recordID: active.id) }
+        let unchangedActive = try Data(contentsOf: activeURL)
+        let unchangedUnknown = try Data(contentsOf: unknown)
+        precondition(unchangedActive == activeBytes && unchangedUnknown == bytes, "Unknown ownership must leave all stored records untouched, including launch recovery")
+        print("PASS: unreadable, newer-schema and failed-read files preserve healthy history and original files; unsafe writes, cleanup, import and incomplete export are blocked; staging remains strict")
+    }
+
+    private static func expectUnavailable(_ operation: () throws -> Void) throws {
+        do { try operation(); preconditionFailure("Unavailable record state must fail safely") }
+        catch is TincallError { }
     }
 
     @MainActor private static func checkLocalCleanup(_ directory: URL) throws {

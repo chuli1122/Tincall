@@ -4,9 +4,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
+import fs from 'node:fs';
+import {syncBuiltinESMExports} from 'node:module';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createPushGateway,PushError} from '../apns-sender.mjs';
+
+test('push database is private before permission tightening even with a permissive umask',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'tincall-push-permissions-')),path=join(dir,'push.sqlite');
+  const chmod=fs.chmodSync,mask=process.umask(0o022);let gateway;
+  fs.chmodSync=(file,mode)=>{assert.equal(fs.statSync(file).mode & 0o777,0o600);return chmod(file,mode);};
+  syncBuiltinESMExports();
+  try {gateway=createPushGateway({databasePath:path,token:'synthetic-permissions-token-at-least-24',send:async()=>{}});}
+  finally {gateway?.close();fs.chmodSync=chmod;syncBuiltinESMExports();process.umask(mask);rmSync(dir,{recursive:true,force:true});}
+});
 
 test('trial expiry prevents new incoming pushes and a purchased rebind clears the deadline',async t=>{
   let now=1800000000000, sent=0;

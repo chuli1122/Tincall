@@ -12,7 +12,7 @@ import time
 transactions = Path(sys.argv[1])
 container = "tincall-deployment-sql-check"
 versions = ["202610110001", "202610110002", "202610140001", "202610160001",
-            "202610180001", "202610190001", "202610190002", "202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001"]
+            "202610180001", "202610190001", "202610190002", "202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001", "202610270001"]
 
 
 def sql(source, succeeds=True):
@@ -72,6 +72,8 @@ try:
         source = (transactions / (version + ".sql")).read_text()
         sql(source)
         sql(source)  # A committed migration must safely resume after a lost response.
+    assert sql("select count(*) from pg_indexes where schemaname='public' and indexname in ('tincall_message_call','tincall_job_reply','tincall_running_job_timeout','tincall_running_push_timeout','tincall_request_action');") == "5"
+    print("PASS: hot-path indexes install and retry without changing existing records")
     assert sql("select count(*) from supabase_migrations.schema_migrations;") == str(len(versions))
     assert sql("select (to_jsonb(s)-'week_day')::text from public.tincall_schedules s;") == sql(
         "select '" + original.replace("'", "''") + "'::jsonb::text;")

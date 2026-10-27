@@ -49,6 +49,10 @@ final class CloudSyncClient {
         session = URLSession(configuration: configuration, delegate: CloudSyncNoRedirects(), delegateQueue: nil)
     }
 
+    deinit {
+        session.invalidateAndCancel()
+    }
+
     func owner(connection: ConnectionProfile) async throws -> UUID {
         authenticatedConnection = connection
         authenticatedToken = try token(connection)
