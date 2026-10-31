@@ -4,6 +4,7 @@
 import AVFoundation
 import Foundation
 import OSLog
+import UIKit
 
 @MainActor
 final class TincallVoiceService: VoiceService {
@@ -47,8 +48,32 @@ final class TincallVoiceService: VoiceService {
     private var backgroundPlayer: AVAudioPlayerNode?
     private var backgroundBuffer: AVAudioPCMBuffer?
     private var backgroundConfigurationObserver: NSObjectProtocol?
+    private var voiceMessageSentPlayer: AVAudioPlayer?
+    private let voiceMessageSentHaptics = UIImpactFeedbackGenerator(style: .soft)
 
     init(credentials: CredentialStore = CredentialStore()) { self.credentials = credentials }
+
+    func playVoiceMessageSentFeedback() {
+        guard session != nil, !audioInterrupted,
+              UserDefaults.standard.object(forKey: "call.voiceMessageSentSound") as? Bool ?? true else { return }
+        voiceMessageSentHaptics.impactOccurred(intensity: 0.5)
+        do {
+            if voiceMessageSentPlayer == nil {
+                guard let url = Bundle.main.url(forResource: "voice-message-sent", withExtension: "wav") else {
+                    logger.error("phase=voice_sent_sound_missing")
+                    return
+                }
+                voiceMessageSentPlayer = try AVAudioPlayer(contentsOf: url)
+            }
+            guard let player = voiceMessageSentPlayer else { return }
+            // Use the already-active call session and its chosen output route.
+            player.volume = 0.45
+            player.currentTime = 0
+            if !player.play() { logger.error("phase=voice_sent_sound_playback_failed") }
+        } catch {
+            logger.error("phase=voice_sent_sound_load_failed error_code=\((error as NSError).code)")
+        }
+    }
 
     func start(session: VoiceSessionID, configuration: VoiceConfiguration) async throws {
         if preparingIncomingAudio, self.session == session {
@@ -361,6 +386,8 @@ final class TincallVoiceService: VoiceService {
     }
 
     func stop() {
+        voiceMessageSentPlayer?.stop()
+        voiceMessageSentPlayer = nil
         preparingIncomingAudio = false
         incomingReply?.playback.stop()
         incomingReply = nil
@@ -844,6 +871,7 @@ final class TincallVoiceService: VoiceService {
                                             phase: shouldResume ? "resume" : "no_resume")
                 if rawType == AVAudioSession.InterruptionType.began.rawValue {
                     self.audioInterrupted = true
+                    self.voiceMessageSentPlayer?.stop()
                     self.recognizer?.stop(); self.recognizer = nil
                     self.clearCaption()
                     self.updateRecognitionPolicy()

@@ -49,6 +49,7 @@ final class TincallRuntime {
             coordinator.onSpeechRecognitionUsed = { id in
                 try configuration.saveDefaultSTTConnection(id)
             }
+            coordinator.onVoiceInputAccepted = { voice.playVoiceMessageSentFeedback() }
             coordinator.onLoadImages = { recordID, message in
                 try (message.images ?? []).map { try Data(contentsOf: records.imageURL($0, recordID: recordID, messageID: message.id)) }
             }

@@ -35,13 +35,29 @@ struct CallDisplaySettings: View {
     var onSetOriginalAudioInput: ((Bool) -> Void)? = nil
     @Environment(\.callPalette) private var palette
     @AppStorage(CaptionFontStore.selectionKey) private var captionFontName = ""
+    @AppStorage("call.voiceMessageSentSound") private var voiceMessageSentSound = true
     @State private var fonts = CaptionFontStore.shared
     private var usesOriginalAudio: Bool { pendingOriginalAudioInputEnabled ?? originalAudioInputEnabled }
 
     var body: some View {
         NavigationStack {
             Form {
-                if let onSelectSpeechRecognition {
+                Section {
+                    Toggle("语音消息发送音效", isOn: $voiceMessageSentSound)
+                    Toggle("允许说话打断", isOn: Binding(
+                        get: { speechInterruptionEnabled },
+                        set: { onSetSpeechInterruptionEnabled?($0) }))
+                        .disabled(onSetSpeechInterruptionEnabled == nil)
+                } header: {
+                    Text("通话")
+                } footer: {
+                    Text("开启说话打断后，对方回复期间仍保持收音。检测到持续约 0.3 秒的人声并识别出文字时，将中断当前回复。")
+                        .font(.footnote)
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .listRowBackground(palette.primaryText.opacity(0.04))
+
+                if !speechRecognitionConnections.isEmpty {
                     Section {
                         CallSettingsMenuRow(title: String(localized: "识别服务"),
                             options: usesOriginalAudio
@@ -52,10 +68,10 @@ struct CallDisplaySettings: View {
                                 get: { (pendingSpeechRecognitionConnectionID ?? speechRecognitionConnectionID)?.uuidString ?? "" },
                                 set: { id in
                                     if let connection = speechRecognitionConnections.first(where: { $0.id.uuidString == id }) {
-                                        onSelectSpeechRecognition(connection)
+                                        onSelectSpeechRecognition?(connection)
                                     }
                                 }))
-                            .disabled(isSwitchingSpeechRecognition || usesOriginalAudio)
+                            .disabled(isSwitchingSpeechRecognition || usesOriginalAudio || onSelectSpeechRecognition == nil)
                         CallSettingsMenuRow(title: String(localized: "发送内容"),
                             options: [(id: "text", title: String(localized: "识别文字")),
                                       (id: "audio", title: String(localized: "原声输入"))],
@@ -84,20 +100,36 @@ struct CallDisplaySettings: View {
                             Text("识别服务切换成功后会保存为默认设置，后续通话继续使用，不影响对方语音播放。原声输入支持 Gemini 和 OpenAI 兼容模型直连。")
                         }
                     }
-                    .listRowBackground(Color.clear)
+                    .listRowBackground(palette.primaryText.opacity(0.04))
                 }
                 Section {
-                    Button(presentation == .voice ? String(localized: "切换到文字视图") : String(localized: "切换到通话视图"),
-                           systemImage: presentation == .voice ? "text.bubble" : "phone",
-                           action: onSwitchPresentation)
-                        .accessibilityHint("可左右滑动内容区域切换视图")
+                    Button(action: onSwitchPresentation) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(presentation == .voice ? String(localized: "切换到文字视图") : String(localized: "切换到通话视图"))
+                                Text("也可左右滑动通话内容切换")
+                                    .font(.caption)
+                                    .foregroundStyle(palette.secondaryText)
+                                    .accessibilityHidden(true)
+                            }
+                            Spacer()
+                            Image(systemName: presentation == .voice ? "text.bubble" : "phone")
+                        }
+                    }
+                    .accessibilityHint("可左右滑动内容区域切换视图")
                     Toggle("显示我的头像", isOn: $showsSelfAvatar)
                     Toggle("通话字幕", isOn: $showsCaptions)
+                } header: {
+                    Text("显示")
+                }
+                .listRowBackground(palette.primaryText.opacity(0.04))
+
+                Section {
                     CallSettingsMenuRow(title: String(localized: "通话字体"),
                         options: [(id: "", title: String(localized: "系统默认"))]
                             + fonts.fonts.map { (id: $0.id, title: $0.title) },
                         selection: $captionFontName)
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("文字大小")
                             Spacer()
@@ -119,11 +151,16 @@ struct CallDisplaySettings: View {
                             .font(Font(fonts.font(named: captionFontName, size: 15 * textScale)))
                             .foregroundStyle(palette.secondaryText)
                             .frame(maxWidth: .infinity, minHeight: 28)
-                        Text("字体用于通话字幕、文字视图正文和输入框；可在设置 → 显示与字体中导入。")
-                            .font(.footnote).foregroundStyle(palette.secondaryText)
                     }
                     .padding(.vertical, 4)
-                    VStack(alignment: .leading, spacing: 12) {
+                } footer: {
+                    Text("字体用于通话字幕、文字视图正文和输入框；可在设置 → 显示与字体中导入。")
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .listRowBackground(palette.primaryText.opacity(0.04))
+
+                Section {
+                    VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("背景蒙版")
                             Spacer()
@@ -137,24 +174,17 @@ struct CallDisplaySettings: View {
                             Text("背景蒙版")
                         }
                         .accessibilityValue(backgroundMaskOpacity.formatted(.percent.precision(.fractionLength(0))))
-                        Text("在背景图上叠加一层随背景明暗变化的遮罩：浅色背景叠加白色，深色背景叠加深色，用于提高文字清晰度。")
-                            .font(.footnote)
-                            .foregroundStyle(palette.secondaryText)
                     }
                     .padding(.vertical, 4)
-                    Toggle("允许说话打断", isOn: Binding(
-                        get: { speechInterruptionEnabled },
-                        set: { onSetSpeechInterruptionEnabled?($0) }))
-                        .disabled(onSetSpeechInterruptionEnabled == nil)
-                } header: {
-                    Text("显示")
                 } footer: {
-                    Text("开启后，对方回复期间仍保持收音。检测到持续约 0.3 秒的人声并识别出文字时，将中断当前回复。")
-                        .font(.footnote)
+                    Text("在背景图上叠加一层随背景明暗变化的遮罩：浅色背景叠加白色，深色背景叠加深色，用于提高文字清晰度。")
                         .foregroundStyle(palette.secondaryText)
                 }
-                .listRowBackground(Color.clear)
+                .listRowBackground(palette.primaryText.opacity(0.04))
+
             }
+            .formStyle(.grouped)
+            .listSectionSpacing(20)
             .scrollContentBackground(.hidden)
             .scrollEdgeEffectStyle(.soft, for: .top)
             .navigationTitle("通话内设置")
@@ -167,7 +197,7 @@ struct CallDisplaySettings: View {
     }
 }
 
-/// Uses the font selector's fixed label for all three call-setting menus.
+/// Keeps native menu hit targets aligned with the other form rows.
 private struct CallSettingsMenuRow: View {
     let title: String
     let options: [(id: String, title: String)]
@@ -181,18 +211,19 @@ private struct CallSettingsMenuRow: View {
             Spacer()
             Text(options.first(where: { $0.id == selection })?.title ?? "")
                 .lineLimit(1)
-            Image(systemName: "chevron.up.chevron.down").font(.caption)
+                .foregroundStyle(palette.secondaryText)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption)
+                .foregroundStyle(palette.secondaryText)
         }
         .foregroundStyle(palette.primaryText)
-        .frame(maxWidth: .infinity, minHeight: 48)
+        .frame(maxWidth: .infinity, minHeight: 52)
         .padding(.horizontal, 20)
-        .padding(.vertical, 6)
         .allowsHitTesting(false)
         .overlay {
             CallSettingsMenu(title: title, options: options, selection: $selection, disabledIDs: disabledIDs)
         }
         .listRowInsets(EdgeInsets())
-        .listRowSeparator(.hidden)
     }
 }
 

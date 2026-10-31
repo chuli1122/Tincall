@@ -225,6 +225,49 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         call.onSaveRecord = { _ in }
         let f = OpeningProtocol.fixture
         let callID = f.lock.withLock { f.call }
+        if CommandLine.arguments.contains("--voice-sent-sound-only") {
+            f.lock.withLock { f.available = 0 }
+            try await call.prepareIncoming(callID: callID, role: role, connector: connector,
+                connections: [connector, stt, tts], retention: AudioRetention())
+            try await call.confirmIncoming(callID: callID)
+            try await call.activatePreparedIncoming(callID: callID)
+            let identity = call.session!
+            var acceptedSounds = 0
+            call.onVoiceInputAccepted = { acceptedSounds += 1 }
+            let inputID = UUID()
+            voice.onEvent?(.transcript(identity, TranscriptResult(inputID: inputID, text: "Partial", isFinal: false)))
+            voice.onEvent?(.transcript(identity, TranscriptResult(inputID: UUID(), text: " ", isFinal: true)))
+            precondition(acceptedSounds == 0, "Partial and empty speech must not play a sent cue")
+            let final = TranscriptResult(inputID: inputID, text: "Final spoken input", isFinal: true)
+            voice.onEvent?(.transcript(identity, final))
+            voice.onEvent?(.transcript(identity, final))
+            try await until { call.record?.externalPendingInput == nil && f.lock.withLock { f.inputTexts.count == 1 } }
+            precondition(acceptedSounds == 1, "A final spoken input plays once despite duplicate final callbacks")
+            precondition(call.sendText("Typed input"))
+            try await until { call.record?.externalPendingInput == nil && f.lock.withLock { f.inputTexts.count == 2 } }
+            precondition(acceptedSounds == 1, "Typed input must not play the voice sent cue")
+            var failsSaving = true
+            call.onSaveRecord = { _ in
+                if failsSaving { throw TincallError(message: "Synthetic save failure") }
+            }
+            let retry = TranscriptResult(inputID: UUID(), text: "Retry spoken input", isFinal: true)
+            voice.onEvent?(.transcript(identity, retry))
+            precondition(acceptedSounds == 1 && call.pendingFinalInputs[callID]?.count == 1,
+                "A failed save must not sound like a successfully accepted input")
+            failsSaving = false
+            call.retrySaving()
+            try await until { call.record?.externalPendingInput == nil && f.lock.withLock { f.inputTexts.count == 3 } }
+            call.retrySaving()
+            voice.onEvent?(.transcript(identity, retry))
+            precondition(acceptedSounds == 2, "Saving recovery must play once and never replay the cue")
+            voice.onEvent?(.transcript(identity, TranscriptResult(inputID: UUID(), text: "Unfinished speech", isFinal: false)))
+            call.hangUp()
+            voice.onEvent?(.transcript(identity, TranscriptResult(inputID: UUID(), text: "Late final", isFinal: true)))
+            precondition(acceptedSounds == 2, "Hangup preservation and late callbacks must not play a sent cue")
+            try await until { f.lock.withLock { f.ended } }
+            print("PASS: voice sent cue fires once for accepted final speech and save recovery; skips partial, empty, duplicate, typed and ended-call input")
+            return
+        }
         if CommandLine.arguments.contains("--unanswered-inputs-only") {
             f.lock.withLock { f.available = 0 }
             try await call.prepareIncoming(callID: callID, role: role, connector: connector,

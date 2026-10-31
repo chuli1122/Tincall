@@ -44,6 +44,8 @@ final class CallCoordinator {
     @ObservationIgnored var onDiscardImages: ((UUID, UUID, [CallImageAsset]) throws -> Void)?
     /// Persists a successfully selected in-call STT connection as the next-call default.
     @ObservationIgnored var onSpeechRecognitionUsed: ((UUID) throws -> Void)?
+    /// A final spoken input has been saved and accepted into the send queue.
+    @ObservationIgnored var onVoiceInputAccepted: (() -> Void)?
     @ObservationIgnored var onStartOutgoingAudio: (@MainActor (VoiceSessionID, CallRole, VoiceConfiguration) async throws -> Void)?
     @ObservationIgnored let model: ChatCompletionClient
     @ObservationIgnored let external: ExternalCallClient
@@ -301,6 +303,7 @@ final class CallCoordinator {
                 if session?.callID == id, phase == .active {
                     finalInputs.insert(user.id)
                     partialTranscript = ""
+                    onVoiceInputAccepted?()
                 }
             }
             persistAudio(id)

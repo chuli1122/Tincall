@@ -1,6 +1,26 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "也可左右滑动通话内容切换" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can also swipe left or right on the call content"
+          }
+        }
+      }
+    },
+    "语音消息发送音效" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice Message Sent Sound"
+          }
+        }
+      }
+    },
     "高级参数": {
       "localizations": {
         "en": {
@@ -9882,12 +9902,12 @@
         }
       }
     },
-    "开启后，对方回复期间仍保持收音。检测到持续约 0.3 秒的人声并识别出文字时，将中断当前回复。" : {
+    "开启说话打断后，对方回复期间仍保持收音。检测到持续约 0.3 秒的人声并识别出文字时，将中断当前回复。" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Keeps the microphone listening during a reply. The reply is interrupted when speech lasts about 0.3 seconds and words are recognized."
+            "value" : "With speech interruption enabled, the microphone keeps listening during a reply. The reply is interrupted when speech lasts about 0.3 seconds and words are recognized."
           }
         }
       }

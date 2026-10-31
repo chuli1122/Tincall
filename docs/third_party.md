@@ -24,6 +24,8 @@ App 关于页提供相关许可入口。源码分发保留 LAME 源码及构建�
 
 ## 模型、声音和系统资源
 
+语音消息发送音效来自 [Kenney Interface Sounds 1.0](https://kenney.nl/assets/interface-sounds) 的 `Audio/drop_002.ogg`，转换为 PCM WAV。素材按 CC0 许可，允许商用、修改和分发，无需署名；[原始许可](../ios/Tincall/Voice/Assets/Sounds/Kenney-Interface-Sounds-LICENSE.txt)随源码与 App 保留。
+
 Apple、讯飞、百炼、Whisper 兼容服务、MiniMax、ElevenLabs、Fish Audio、OpenAI 兼容服务、Anthropic、Gemini 等是接口接入。除上表明确列出的 VAD 外，没有随源码分发这些供应商的模型权重或语音 SDK。模型、音色、音频和账户的使用权限按提供方条款处理。
 
 系统字体与 SF Symbols 由 Apple 平台提供，不属于本项目重新许可的字体资产。项目不附带第三方字体文件。

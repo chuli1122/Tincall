@@ -208,6 +208,7 @@ extension CallCoordinator {
                 interruptedSpeechInputs.insert(result.inputID)
                 interrupt(automatically: true)
             } else { beginQueuedInput() }
+            if session == identity, phase == .active { onVoiceInputAccepted?() }
         case let .microphoneState(identity, muted):
             guard session == identity else { return }
             isMuted = muted
