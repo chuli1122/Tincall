@@ -392,7 +392,9 @@ struct CallScreen<Transcript: View>: View {
             statusLine.padding(.top, 18).offset(y: -4)
             if showsCaptions {
                 VStack(spacing: 8) {
-                    Text(captionSpeaker.isEmpty ? " " : captionSpeaker).font(CallNight.font(11))
+                    // The dots belong to the user's speech that is still being recognized.
+                    let speaker = awaitingSpeechTranscript && captionText.isEmpty ? userDisplayName : captionSpeaker
+                    Text(speaker.isEmpty ? " " : speaker).font(CallNight.font(11))
                         .foregroundStyle(palette.secondaryText)
                         .lineLimit(1)
                         .opacity(captionText.isEmpty && !awaitingSpeechTranscript ? 0 : 1)

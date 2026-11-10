@@ -19,16 +19,22 @@ struct GlobalBackupScreen: View {
     @State private var configurationBytes: Int64?
     @State private var storageError: String?
     @State private var cleanupCategory: CallRecordStore.LocalDataCategory?
+    @State private var showsCleanup = false
 
     var body: some View {
         SettingsList {
             Section {
                 LabeledContent("联系人", value: "\(configuration.roles.count)")
                 LabeledContent("通话记录", value: "\(records.records.count)")
-                LabeledContent("通话文字", value: formattedBytes(storageUsage?.textBytes))
-                LabeledContent("消息图片", value: formattedBytes(storageUsage?.imageBytes))
-                LabeledContent("已保存录音", value: String(localized: "\(records.records.reduce(0) { $0 + $1.audioAssets.count }) 段") + " · " + formattedBytes(storageUsage?.audioBytes))
-                LabeledContent("配置数据", value: formattedBytes(configurationBytes))
+                if let storageUsage {
+                    SettingsUsageBar(segments: [
+                        .init(title: String(localized: "已保存录音"), bytes: storageUsage.audioBytes,
+                              detail: String(localized: "\(records.records.reduce(0) { $0 + $1.audioAssets.count }) 段")),
+                        .init(title: String(localized: "消息图片"), bytes: storageUsage.imageBytes),
+                        .init(title: String(localized: "通话文字"), bytes: storageUsage.textBytes),
+                        .init(title: String(localized: "配置数据"), bytes: configurationBytes ?? 0),
+                    ])
+                }
                 if let storageError {
                     Text("无法统计本机数据大小：\(storageError)").font(.footnote).foregroundStyle(.secondary)
                 }
@@ -51,9 +57,28 @@ struct GlobalBackupScreen: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section {
-                cleanupButton(.audio, title: String(localized: "清理所有录音"), detail: String(localized: "保留通话文字、摘要和图片"))
-                cleanupButton(.images, title: String(localized: "清理所有消息图片"), detail: String(localized: "保留通话文字、摘要和录音"))
-                cleanupButton(.records, title: String(localized: "清理全部通话记录"), detail: String(localized: "删除文字、摘要、图片和录音"))
+                Button { showsCleanup = true } label: {
+                    SettingsActionLabel(title: String(localized: "清理本机数据"), symbol: "trash", detail: String(localized: "录音、消息图片或全部通话记录"))
+                }
+                .buttonStyle(.plain)
+                .disabled(records.records.isEmpty || cloudSync?.isBusy == true)
+                // The menu explains the choices; the alert then confirms the one picked.
+                .confirmationDialog("清理本机数据", isPresented: $showsCleanup, titleVisibility: .visible) {
+                    ForEach([CallRecordStore.LocalDataCategory.audio, .images, .records], id: \.self) { category in
+                        if records.records.contains(where: category.contains) {
+                            Button(cleanupOptionTitle(category), role: .destructive) {
+                                // The alert cannot appear while this menu is still dismissing.
+                                Task { @MainActor in
+                                    try? await Task.sleep(for: .milliseconds(400))
+                                    cleanupCategory = category
+                                }
+                            }
+                        }
+                    }
+                    Button("取消", role: .cancel) { }
+                } message: {
+                    Text("清理录音：保留通话文字、摘要和图片。清理消息图片：保留通话文字、摘要和录音。清理全部通话记录：删除文字、摘要、图片和录音。联系人、连接配置、云端副本和已导出文件保留。")
+                }
             } header: { SettingsSectionHeading(title: String(localized: "清理本机数据"), caption: "CLEAN UP") } footer: {
                 VStack(alignment: .leading, spacing: 8) {
                     if cloudSync?.isBusy == true {
@@ -139,13 +164,12 @@ struct GlobalBackupScreen: View {
         } message: { Text(message ?? "") }
     }
 
-    private func cleanupButton(_ category: CallRecordStore.LocalDataCategory, title: String, detail: String) -> some View {
-        Button(role: .destructive) { cleanupCategory = category } label: {
-            SettingsActionLabel(title: title, symbol: "trash", detail: detail)
-                .foregroundStyle(.red)
+    private func cleanupOptionTitle(_ category: CallRecordStore.LocalDataCategory) -> String {
+        switch category {
+        case .audio: String(localized: "清理所有录音")
+        case .images: String(localized: "清理所有消息图片")
+        case .records: String(localized: "清理全部通话记录")
         }
-        .buttonStyle(.plain)
-        .disabled(!records.records.contains(where: category.contains))
     }
 
     private var cleanupTitle: String {
@@ -188,11 +212,6 @@ struct GlobalBackupScreen: View {
             try records.clearLocalData(category)
             message = String(localized: "所选本机数据已清理。")
         } catch { message = String(localized: "清理未全部完成：\(error.localizedDescription) 已完成的部分不会撤销。") }
-    }
-
-    private func formattedBytes(_ bytes: Int64?) -> String {
-        guard let bytes else { return "—" }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     private func refreshStorageUsage() {

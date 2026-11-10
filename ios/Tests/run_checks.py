@@ -80,7 +80,7 @@ MACOS = {"SpeechPlaybackChecks", "CloudSTTLifecycleChecks", "CallAccessStoreChec
 PARTIAL = {"SpeechPlaybackChecks", "CallAccessStoreChecks", "SystemCallContactChecks", "SupabaseDeploymentChecks"}
 VARIANTS = {
     "MCPOpeningChecks": ["--unanswered-inputs-only", "--time-awareness-only", "--mcp-reentrant-failure-only",
-        "--voice-sent-sound-only",
+        "--voice-sent-sound-only", "--opening-speaker-only",
         "--stt-switch-only", "--mcp-queue-only", "--missed-call", "--mcp-message-only", "--mcp-end-only",
         "--connection-timing-only", "--redial-recovery-only", "--network-recovery-only"],
     "IncomingForegroundChecks": ["--caller-handle", "--connection-removal", "--bindings", "--foreground-handoff",

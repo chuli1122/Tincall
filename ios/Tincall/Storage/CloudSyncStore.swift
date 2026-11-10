@@ -19,6 +19,12 @@ final class CloudSyncStore {
     private(set) var canDiscardPending = false
     private(set) var connected = false
     private(set) var requiresDestinationConfirmation = false
+    /// Bytes referenced by this owner's backups; nil when the service cannot report it.
+    private(set) var usage: CloudSyncUsage?
+    /// Records whose cloud copy had recordings / images removed; local copies keep them.
+    private(set) var cloudClearedAudio: Set<UUID> = []
+    private(set) var cloudClearedImages: Set<UUID> = []
+    var supportsMediaRemoval: Bool { client.supportsMediaRemoval }
     @ObservationIgnored private let records: CallRecordStore
     @ObservationIgnored private let client: CloudSyncClient
     @ObservationIgnored private let connector = ExternalCallClient()
@@ -81,7 +87,7 @@ final class CloudSyncStore {
         try persist(next)
         selectedConnectionID = id
         scope = nil; connected = false; mediaEnabled = false; hasPendingOperation = false; canDiscardPending = false
-        remoteRecords = []; conflicts = []; status = String(localized: "尚未连接云端")
+        remoteRecords = []; conflicts = []; usage = nil; status = String(localized: "尚未连接云端")
     }
 
     func setTextSyncEnabled(_ enabled: Bool) throws {
@@ -142,6 +148,7 @@ final class CloudSyncStore {
             try await self.bind(connection, allowDestinationChange: confirmDestinationChange)
             self.remoteRecords = try await self.client.list(connection: connection)
             self.sortRemote()
+            await self.refreshUsage(connection)
             try self.clearAutomaticRetry(connection)
             self.status = String(localized: "已连接云端，共 \(self.remoteRecords.count) 通记录。尚未上传本机内容。")
         }
@@ -152,6 +159,7 @@ final class CloudSyncStore {
         await perform {
             try await self.synchronizeContents(connection: connection)
             try self.clearAutomaticRetry(connection)
+            await self.refreshUsage(connection)
         }
     }
 
@@ -181,7 +189,7 @@ final class CloudSyncStore {
                           self.canSynchronizeRecord(remote.id), let document = remote.record,
                           !document.media.isEmpty,
                           let local = self.records.records.first(where: { $0.id == remote.id }),
-                          CloudSyncDocument.textOnly(local) == document.call else { continue }
+                          CloudSyncDocument.textOnly(self.syncView(local)) == document.call else { continue }
                     try await self.restoreMedia(connection, document: document, automatically: true)
                 }
                 self.status = String(localized: "自动同步已完成，录音按此目标的授权同步。待处理冲突：\(self.conflicts.count) 通。")
@@ -200,6 +208,10 @@ final class CloudSyncStore {
 
     private func synchronizeContents(connection: ConnectionProfile, automatically: Bool = false) async throws {
         try await self.bind(connection)
+        // A removal left unfinished keeps retrying here; a failure waits for the next sync.
+        do { try await self.finishMediaRemovals(connection) }
+        catch is CancellationError { throw CancellationError() }
+        catch { }
         // Retry connector summaries independently of the optional backup document.
         self.status = String(localized: "正在回传尚未上传的通话摘要…")
         for id in self.records.records.map(\.id) {
@@ -229,7 +241,7 @@ final class CloudSyncStore {
                 let local = self.records.records.first { $0.id == id }
                 if index.deleted || (checkpoint.localRemoved && local == nil) { continue }
                 if !checkpoint.localRemoved, let local,
-                   CloudSyncDocument.textOnly(local) == checkpoint.text { continue }
+                   CloudSyncDocument.textOnly(self.syncView(local)) == checkpoint.text { continue }
             }
             self.status = String(localized: "正在同步通话记录：\(position + 1)／\(ids.count)…")
             let remote = index == nil ? nil : try await self.client.get(connection: connection, id: id)
@@ -238,7 +250,9 @@ final class CloudSyncStore {
             try Task.checkCancellation()
             if automatically { try self.requireAutomaticSync(connection) }
             guard self.canSynchronizeRecord(id) else { deferred += 1; continue }
-            let current = self.records.records.first { $0.id == id }
+            if let remote { try self.noteCloudMediaRemoval(remote) }
+            // Images removed from this cloud copy stay local only: compare and upload without them.
+            let current = self.records.records.first { $0.id == id }.map(self.syncView)
             switch CloudSyncDecision.decide(local: current, remote: remote, checkpoint: checkpoint) {
             case .upload:
                 guard let current else { continue }
@@ -250,6 +264,10 @@ final class CloudSyncStore {
                 uploaded += 1
             case .download:
                 guard let remote, let document = remote.record else { continue }
+                // A newer cloud copy without images must never replace local images automatically.
+                if current != nil, self.ledger.cloudClearedImages?.contains(id) == true {
+                    self.conflicts.insert(id); continue
+                }
                 if let current, current.audioAssets.contains(where: { asset in !document.call.messages.contains { $0.id == asset.messageID } }) {
                     self.conflicts.insert(id); continue
                 }
@@ -263,7 +281,7 @@ final class CloudSyncStore {
             case .locallyRemoved:
                 if let remote {
                     var next = self.state
-                    next.ledgers[self.scope!].checkpoints[id] = CloudSyncCheckpoint(revision: remote.revision, text: checkpoint?.text, deleted: false, localRemoved: true)
+                    next.ledgers[self.scope!].checkpoints[id] = CloudSyncCheckpoint(revision: remote.revision, text: checkpoint?.text, deleted: false, localRemoved: true, hadAudio: checkpoint?.hadAudio)
                     try self.persist(next)
                 }
             case .conflict: self.conflicts.insert(id)
@@ -290,7 +308,7 @@ final class CloudSyncStore {
             guard media.allSatisfy({ item in local.messages.contains { $0.id == item.asset.messageID } }) else {
                 throw TincallError(message: String(localized: "云端含本机没有的音频消息，请先恢复云端副本再处理"))
             }
-            try await self.submit(connection, id: id, revision: remote?.revision ?? 0, document: CloudSyncDocument(call: local, media: media, imageReferences: remote?.record?.imageReferences))
+            try await self.submit(connection, id: id, revision: remote?.revision ?? 0, document: CloudSyncDocument(call: self.syncView(local), media: media, imageReferences: remote?.record?.imageReferences))
             self.conflicts.remove(id)
             self.status = String(localized: "已按选择用本机文字更新云端；未上传录音")
         }
@@ -330,6 +348,7 @@ final class CloudSyncStore {
             if remote.deleted { try self.remember(remote); return }
             try await self.submit(connection, id: id, revision: remote.revision, document: nil)
             self.conflicts.remove(id)
+            await self.refreshUsage(connection)
             self.status = String(localized: "已删除云端副本与媒体；本机记录保留，后续同步不会自动回传")
         }
     }
@@ -374,6 +393,7 @@ final class CloudSyncStore {
             catch {
                 throw TincallError(message: String(localized: "清空未完成：已确认删除 \(deleted)／\(selection.count) 通。请处理错误后继续。") + "\n" + error.localizedDescription)
             }
+            await self.refreshUsage(connection)
             self.status = String(localized: "已清空 \(deleted) 通云端备份；本机记录、MCP 通话和来电计划保留。已删除的记录不会随同步重新上传。")
         }
     }
@@ -385,7 +405,10 @@ final class CloudSyncStore {
     }
 
     func backupMedia(connection: ConnectionProfile) async {
-        await perform { try await self.backupMediaContents(connection: connection) }
+        await perform {
+            try await self.backupMediaContents(connection: connection)
+            await self.refreshUsage(connection)
+        }
     }
 
     private func backupMediaContents(connection: ConnectionProfile, automatically: Bool = false) async throws {
@@ -393,7 +416,7 @@ final class CloudSyncStore {
         guard self.mediaEnabled else { throw TincallError(message: String(localized: "请先确认此目标的媒体备份说明")) }
         try self.requireNoPending()
         var count = 0
-        let ids = self.records.records.filter { $0.isFinished && !$0.audioAssets.isEmpty }.map(\.id)
+        let ids = self.records.records.filter { $0.isFinished && !$0.audioAssets.isEmpty && self.ledger.cloudClearedAudio?.contains($0.id) != true }.map(\.id)
         for id in ids {
             try Task.checkCancellation()
             if automatically {
@@ -409,9 +432,11 @@ final class CloudSyncStore {
                 guard self.mediaEnabled else { throw CancellationError() }
             }
             try self.requireIdleRecord(id)
+            if let remote { try self.noteCloudMediaRemoval(remote) }
+            guard self.ledger.cloudClearedAudio?.contains(id) != true else { continue }
             guard let local = self.records.records.first(where: { $0.id == id }) else { continue }
             guard let remote, !remote.deleted,
-                  let document = remote.record, document.call == CloudSyncDocument.textOnly(local) else {
+                  let document = remote.record, document.call == CloudSyncDocument.textOnly(self.syncView(local)) else {
                 if automatically { continue }
                 throw TincallError(message: String(localized: "请先同步文字并处理冲突，再备份已有录音"))
             }
@@ -424,6 +449,203 @@ final class CloudSyncStore {
             count += uploads.count
         }
         self.status = String(localized: "已备份 \(count) 段此前保留的录音；没有开启新的录音")
+    }
+
+    /// Another phone removed this copy's cloud images or recordings. Mark it here too, so the change
+    /// never deletes local images and this phone does not upload the recordings again.
+    private func noteCloudMediaRemoval(_ remote: CloudSyncRemote) throws {
+        guard !remote.deleted, let document = remote.record, let checkpoint = ledger.checkpoints[remote.id],
+              checkpoint.revision != remote.revision else { return }
+        // Images: the cloud text equals the last synced text minus its images.
+        if ledger.cloudClearedImages?.contains(remote.id) != true, let previous = checkpoint.text,
+           previous.messages.contains(where: { $0.images?.isEmpty == false }),
+           !document.call.messages.contains(where: { $0.images?.isEmpty == false }),
+           Self.withoutImages(previous) == document.call {
+            try setCloudCleared([remote.id], audio: nil, images: true)
+        }
+        // Recordings: the last synced revision had them and this one has none.
+        if ledger.cloudClearedAudio?.contains(remote.id) != true, checkpoint.hadAudio == true, document.media.isEmpty {
+            try setCloudCleared([remote.id], audio: true, images: nil)
+        }
+    }
+
+    /// The local record as this cloud copy should see it: images removed from the cloud stay local only.
+    private func syncView(_ record: CallRecord) -> CallRecord {
+        ledger.cloudClearedImages?.contains(record.id) == true ? Self.withoutImages(record) : record
+    }
+
+    private static func withoutImages(_ record: CallRecord) -> CallRecord {
+        var value = record
+        for index in value.messages.indices { value.messages[index].images = nil }
+        return value
+    }
+
+    private func setCloudCleared(_ ids: [UUID], audio: Bool?, images: Bool?) throws {
+        var next = state
+        for id in ids {
+            if let audio {
+                if audio { next.ledgers[scope!].cloudClearedAudio = (next.ledgers[scope!].cloudClearedAudio ?? []).union([id]) }
+                else { next.ledgers[scope!].cloudClearedAudio?.remove(id) }
+            }
+            if let images {
+                if images { next.ledgers[scope!].cloudClearedImages = (next.ledgers[scope!].cloudClearedImages ?? []).union([id]) }
+                else { next.ledgers[scope!].cloudClearedImages?.remove(id) }
+            }
+        }
+        try persist(next)
+        cloudClearedAudio = ledger.cloudClearedAudio ?? []
+        cloudClearedImages = ledger.cloudClearedImages ?? []
+    }
+
+    private func refreshUsage(_ connection: ConnectionProfile) async {
+        // Older services have no usage route; the screen then shows no figure.
+        usage = try? await client.usage(connection: connection)
+    }
+
+    /// Downloads one cloud image for viewing only; nothing is saved locally.
+    func cloudImage(connection: ConnectionProfile, recordID: UUID, image: CloudSyncImageReference) async throws -> Data {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await client.downloadImage(connection: connection, recordID: recordID, image: image, destination: url)
+        return try Data(contentsOf: url)
+    }
+
+    /// Loads one cloud copy's full contents for display.
+    func loadDetail(connection: ConnectionProfile, id: UUID) async {
+        // Reading one copy is not a sync step; keep the page's last status once it loads.
+        let previous = status
+        await perform {
+            try await self.bind(connection)
+            if let remote = try await self.client.get(connection: connection, id: id) { self.replaceRemote(remote) }
+        }
+        // Also covers leaving the page mid-read; only a real failure keeps its own status.
+        if errorMessage == nil { status = previous }
+    }
+
+    /// Removes recordings and/or images from the given cloud copies (all when ids is nil).
+    /// Local records keep theirs, and later syncs do not upload them again.
+    func removeCloudMedia(connection: ConnectionProfile, ids: [UUID]?, audio: Bool, images: Bool) async {
+        await perform {
+            try await self.bind(connection)
+            try self.requireNoPending()
+            guard self.client.supportsMediaRemoval else {
+                throw TincallError(message: String(localized: "当前云端尚不支持单独删除录音或图片，请先更新云端服务。"))
+            }
+            // Earlier removals that failed mid-way finish first, with their original request.
+            try await self.finishMediaRemovals(connection)
+            let indexes = try await self.client.list(connection: connection)
+            for remote in indexes { self.replaceRemote(remote) }
+            self.sortRemote()
+            let targets = indexes.filter { remote in
+                guard !remote.deleted, ids.map({ $0.contains(remote.id) }) ?? true else { return false }
+                guard let summary = remote.summary else { return true }
+                return (audio && summary.audio_count > 0) || (images && summary.image_count > 0)
+            }
+            for remote in targets { try self.requireIdleRecord(remote.id) }
+            var done = 0
+            do {
+                for target in targets {
+                    try Task.checkCancellation()
+                    try self.requireIdleRecord(target.id)
+                    self.status = String(localized: "正在清理云端媒体：\(done)／\(targets.count) 通。")
+                    // Record the choice first, so an interrupted request never lets sync re-upload.
+                    try self.setCloudCleared([target.id], audio: audio ? true : nil, images: images ? true : nil)
+                    let removal = CloudMediaRemoval(requestID: UUID(), revision: target.revision, audio: audio, images: images)
+                    if try await self.applyMediaRemoval(connection, id: target.id, removal) { done += 1 }
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                await self.refreshUsage(connection)
+                throw TincallError(message: String(localized: "清理未完成：已处理 \(done)／\(targets.count) 通。") + "\n" + error.localizedDescription)
+            }
+            self.sortRemote()
+            await self.refreshUsage(connection)
+            self.status = String(localized: "已清理 \(done) 通云端副本中的媒体；本机记录保留，之后同步不会再上传。")
+        }
+    }
+
+    /// Sends one removal, saved first so a failure is retried later with the same request ID and the
+    /// service can finish deleting the files. Returns false when the cloud copy no longer exists.
+    private func applyMediaRemoval(_ connection: ConnectionProfile, id: UUID, _ first: CloudMediaRemoval) async throws -> Bool {
+        var removal = first
+        try saveMediaRemoval(id, removal)
+        for attempt in 0..<2 {
+            do {
+                let result = try await client.removeMedia(connection: connection, id: id, requestID: removal.requestID,
+                                                          expectedRevision: removal.revision, audio: removal.audio, images: removal.images)
+                replaceRemote(result)
+                var next = state
+                next.ledgers[scope!].mediaRemovals?.removeValue(forKey: id)
+                // Advance the checkpoint only when this phone was already at the revision the removal
+                // applied to. Otherwise the next sync must still see the other device's newer text.
+                if let old = next.ledgers[scope!].checkpoints[id], old.revision == removal.revision, !old.deleted {
+                    next.ledgers[scope!].checkpoints[id] = CloudSyncCheckpoint(
+                        revision: result.revision, text: result.record?.call, deleted: result.deleted, localRemoved: old.localRemoved,
+                        hadAudio: result.record.map { !$0.media.isEmpty })
+                }
+                try persist(next)
+                return true
+            } catch let failure as CloudSyncFailure where failure.code == "revision_conflict" && attempt == 0 {
+                guard let latest = try await client.get(connection: connection, id: id), !latest.deleted else { break }
+                removal = CloudMediaRemoval(requestID: UUID(), revision: latest.revision, audio: removal.audio, images: removal.images)
+                try saveMediaRemoval(id, removal)
+            }
+        }
+        try saveMediaRemoval(id, nil)
+        return false
+    }
+
+    private func saveMediaRemoval(_ id: UUID, _ removal: CloudMediaRemoval?) throws {
+        var next = state
+        var removals = next.ledgers[scope!].mediaRemovals ?? [:]
+        removals[id] = removal
+        next.ledgers[scope!].mediaRemovals = removals.isEmpty ? nil : removals
+        try persist(next)
+    }
+
+    private func finishMediaRemovals(_ connection: ConnectionProfile) async throws {
+        guard client.supportsMediaRemoval else { return }
+        for (id, removal) in ledger.mediaRemovals ?? [:] {
+            try Task.checkCancellation()
+            _ = try await applyMediaRemoval(connection, id: id, removal)
+        }
+    }
+
+    /// Undo removeCloudMedia for one call: upload its local images and, when allowed, recordings.
+    func reuploadLocalMedia(connection: ConnectionProfile, id: UUID) async {
+        await perform {
+            try await self.bind(connection)
+            try self.requireNoPending()
+            try self.requireIdleRecord(id)
+            guard let local = self.records.records.first(where: { $0.id == id }) else {
+                throw TincallError(message: String(localized: "找不到已结束的本机通话"))
+            }
+            if let removal = self.ledger.mediaRemovals?[id] { _ = try await self.applyMediaRemoval(connection, id: id, removal) }
+            guard let remote = try await self.client.get(connection: connection, id: id), !remote.deleted, let document = remote.record else {
+                throw TincallError(message: String(localized: "云端副本已删除或不存在"))
+            }
+            // Uploading local text is only safe when this phone has seen the current cloud revision.
+            guard !self.conflicts.contains(id), let checkpoint = self.ledger.checkpoints[id],
+                  checkpoint.revision == remote.revision, !checkpoint.localRemoved else {
+                throw TincallError(message: String(localized: "这通电话的云端版本与本机不一致，请先同步并处理冲突后再重新上传。"))
+            }
+            try self.setCloudCleared([id], audio: false, images: false)
+            if CloudSyncDocument.textOnly(local) != document.call {
+                try await self.submit(connection, id: id, revision: remote.revision, document: CloudSyncDocument(call: local, media: document.media, imageReferences: document.imageReferences))
+            }
+            if self.mediaEnabled, !local.audioAssets.isEmpty,
+               let latest = try await self.client.get(connection: connection, id: id), let current = latest.record {
+                let backup = try self.transfer.prepareBackup(local, document: current)
+                if !backup.uploads.isEmpty {
+                    try self.savePending(CloudSyncPending(requestID: UUID(), recordID: id, expectedRevision: latest.revision, document: backup.document, uploads: backup.uploads))
+                    try await self.resumePending(connection)
+                }
+            }
+            if let latest = try await self.client.get(connection: connection, id: id) { self.replaceRemote(latest); try self.remember(latest) }
+            await self.refreshUsage(connection)
+            self.status = self.mediaEnabled ? String(localized: "已重新上传这通电话的本机图片和录音")
+                : String(localized: "已重新上传这通电话的本机图片；录音同步未开启，未上传录音")
+        }
     }
 
     func continuePending(connection: ConnectionProfile) async {
@@ -464,7 +686,7 @@ final class CloudSyncStore {
         let owner = try await client.owner(connection: connection)
         guard let endpoint = connection.endpoint?.absoluteString else { throw TincallError(message: String(localized: "云端地址缺失")) }
         if let previous, previous.connectionID != connection.id || previous.endpoint != endpoint || previous.ownerID != owner {
-            remoteRecords = []; conflicts = []; connected = false
+            remoteRecords = []; conflicts = []; connected = false; usage = nil
             if !allowDestinationChange {
                 requiresDestinationConfirmation = true
                 throw TincallError(message: String(localized: "同步目标或所属账户已变更，请重新读取云端列表后操作"))
@@ -485,6 +707,8 @@ final class CloudSyncStore {
         scope = index
         connected = true
         mediaEnabled = ledger.mediaConsent
+        cloudClearedAudio = ledger.cloudClearedAudio ?? []
+        cloudClearedImages = ledger.cloudClearedImages ?? []
         hasPendingOperation = ledger.pending != nil
         canDiscardPending = ledger.pending.map { !$0.isDelete && (!$0.manifestAttempted || $0.revisionRejected) } ?? false
     }
@@ -540,7 +764,8 @@ final class CloudSyncStore {
             let remote = try await client.mutate(connection: connection, pending: pending, images: images)
             var next = state
             next.ledgers[scope!].pending = nil
-            next.ledgers[scope!].checkpoints[remote.id] = CloudSyncCheckpoint(revision: remote.revision, text: pending.document?.call, deleted: remote.deleted)
+            next.ledgers[scope!].checkpoints[remote.id] = CloudSyncCheckpoint(revision: remote.revision, text: pending.document?.call, deleted: remote.deleted,
+                                                                               hadAudio: pending.document.map { !$0.media.isEmpty })
             try persist(next)
             hasPendingOperation = false; canDiscardPending = false
             replaceRemote(remote)
@@ -581,7 +806,8 @@ final class CloudSyncStore {
     private func remember(_ remote: CloudSyncRemote) throws {
         try records.requireCompleteLoading()
         var next = state
-        next.ledgers[scope!].checkpoints[remote.id] = CloudSyncCheckpoint(revision: remote.revision, text: remote.record?.call, deleted: remote.deleted)
+        next.ledgers[scope!].checkpoints[remote.id] = CloudSyncCheckpoint(revision: remote.revision, text: remote.record?.call, deleted: remote.deleted,
+                                                                          hadAudio: remote.record.map { !$0.media.isEmpty })
         try persist(next)
     }
 
@@ -608,8 +834,11 @@ final class CloudSyncStore {
     }
 
     private func replaceRemote(_ remote: CloudSyncRemote) {
+        var value = remote
+        // record.get carries the body but not the list's name/time facts.
+        if value.summary == nil { value.summary = remoteRecords.first { $0.id == remote.id }?.summary }
         remoteRecords.removeAll { $0.id == remote.id }
-        remoteRecords.append(remote)
+        remoteRecords.append(value)
     }
 
     private func sortRemote() { remoteRecords.sort { $0.updated_at > $1.updated_at } }
@@ -631,7 +860,9 @@ final class CloudSyncStore {
         if let connection = automaticConnection, let retry = state.automaticRetries[connection.id.uuidString],
            retry.endpoint == connection.endpoint?.absoluteString, retry.retryAfter > Date() { return }
         isBusy = true; errorMessage = nil; requiresDestinationConfirmation = false
-        status = String(localized: "正在连接云端…")
+        let previous = status
+        let connecting = String(localized: "正在连接云端…")
+        status = connecting
         defer { isBusy = false }
         do {
             try Task.checkCancellation()
@@ -639,6 +870,8 @@ final class CloudSyncStore {
             // even when the cloud ledger has an older checkpoint or pending write.
             try records.requireCompleteLoading()
             try await operation()
+            // Reads that only prepare a confirmation (or load a detail) leave no status of their own.
+            if status == connecting { status = previous }
             if let connection = automaticConnection { try clearAutomaticRetry(connection) }
         }
         catch is CancellationError { status = String(localized: "操作已暂停，已保存的本机内容和待完成请求保留") }

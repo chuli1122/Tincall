@@ -84,6 +84,9 @@ final class AppleSpeechRecognizer: SpeechRecognizer {
         guard self.paused != paused else { return }
         self.paused = paused
         capture.setPaused(paused)
+        // A route change can update the pause while start() awaits system assets.
+        // Keep the flag for capture, but don't invalidate the start in progress.
+        guard running else { return }
         resetUtterance()
         onReset?()
     }

@@ -354,7 +354,8 @@ final class IncomingCallController: NSObject, @preconcurrency PKPushRegistryDele
             do { try await disable() }
             catch { report(error) }
         } else if settings.enabled {
-            do { try await enable(connections: eligible, environment: settings.environment) }
+            // The installed build's signature wins: a saved value may come from a Debug/TestFlight/store switch.
+            do { try await enable(connections: eligible, environment: Self.signedPushEnvironment() ?? settings.environment) }
             catch { if !(error is CancellationError) { report(error) } }
         }
     }

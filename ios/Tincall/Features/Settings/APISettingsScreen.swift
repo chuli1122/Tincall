@@ -122,7 +122,7 @@ private struct ModelPresetEditor: View {
         SettingsList {
             Section {
                 SettingsField(title: String(localized: "连接名称")) {
-                    TextField("例如：日常聊天", text: $connection.name)
+                    SettingsTextField(placeholder: String(localized: "例如：日常聊天"), text: $connection.name)
                         .accessibilityLabel("连接名称")
                 }
             } header: { SettingsSectionHeading(number: "01", title: String(localized: "连接信息"), caption: "CONNECTION") }

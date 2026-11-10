@@ -429,8 +429,7 @@ private struct ScheduleTimeZonePicker: View {
         SettingsList {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜索地区或时区", text: $search)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
+                SettingsTextField(placeholder: String(localized: "搜索地区或时区"), text: $search, returnKey: .search, plain: true)
             }
             if search.isEmpty {
                 Section {

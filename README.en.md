@@ -67,17 +67,19 @@ Backend mode can use an entirely custom service, or provide only `generation_url
 
 ### Your computer or server
 
-Install Node.js LTS. Node 24 is recommended; Node 22.5 is the minimum and must have built-in SQLite available. Run from the source root:
+Install Node.js LTS. Node 24 is recommended; Node 22.5 is the minimum and must have built-in SQLite available. Then copy and run one command to download the latest public source and install it. To update, run the same command again; existing data and tokens are kept.
 
 ```sh
-# macOS / Linux
-sh connector/install-local.sh
+# macOS / Linux: source goes to ~/Tincall
+mkdir -p ~/Tincall && curl -fsSL https://github.com/chuli1122/Tincall/archive/refs/heads/main.tar.gz | tar -xz -C ~/Tincall --strip-components=1 && sh ~/Tincall/connector/install-local.sh
 ```
 
 ```powershell
-# Windows; WSL is not required
-powershell -NoProfile -ExecutionPolicy Bypass -File connector\install-local.ps1
+# Windows; WSL is not required. Source goes to %USERPROFILE%\Tincall-main
+iwr https://github.com/chuli1122/Tincall/archive/refs/heads/main.zip -OutFile $env:TEMP\tincall.zip; Expand-Archive $env:TEMP\tincall.zip $env:USERPROFILE -Force; powershell -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\Tincall-main\connector\install-local.ps1
 ```
+
+If you already have the source, you can also run `sh connector/install-local.sh` or `connector\install-local.ps1` from the source root.
 
 Docker is also supported. The connector listens on loopback by default. The phone needs a reachable HTTPS address; follow the [computer/server setup guide](docs/setup.en.md#node-on-your-computer-or-server) to configure access through a reverse proxy or tunnel. Enter the HTTPS base address and phone token under “Connect to an existing service” in the app. Keep the computer running. Temporary tunnel addresses may change after restarting.
 

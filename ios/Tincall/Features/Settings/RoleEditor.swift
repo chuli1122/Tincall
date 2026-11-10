@@ -52,6 +52,7 @@ struct RoleEditor: View {
     @State private var saveFeedbackTrigger = 0
     @State private var showsSavedFeedback = false
     @State var manualMCPContactID: String?
+    @State var oauthAuthorizationConnection: ConnectionProfile?
     @Environment(\.dismiss) var dismiss
     @Environment(\.openURL) var openURL
 
@@ -88,6 +89,7 @@ struct RoleEditor: View {
                 voiceCard
                 backgroundAndSummaryCard
                 timeAwarenessCard
+                if role.supportsOpeningSpeaker { openingSpeakerCard }
                 sectionHeading("03", "CONNECTION MODE", title: String(localized: "连接模式"))
                 modeCard
                 if let errorMessage {
@@ -171,6 +173,12 @@ struct RoleEditor: View {
         content
         .sheet(isPresented: $isShowingContactPicker, onDismiss: invalidateSelection) {
             SystemContactPicker(reader: store.contactReader, onSelect: selectSystemContact)
+        }
+        .navigationDestination(isPresented: Binding(get: { oauthAuthorizationConnection != nil },
+                                                    set: { if !$0 { oauthAuthorizationConnection = nil } })) {
+            if let connection = oauthAuthorizationConnection {
+                MCPOAuthAuthorizationSettings(connection: connection, preferredContactID: role.mcpContactID)
+            }
         }
         .sheet(isPresented: $isShowingPromptEditor) {
             NavigationStack {

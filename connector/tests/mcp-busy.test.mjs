@@ -116,7 +116,7 @@ test('MCP default wait lasts 120 seconds and exposes no caller-managed reply ide
     await tool('tincall_wait',{timeout_seconds:1});
     context.mock.method(Date,'now',()=>clock);advance=true;
     const timeout=await tool('tincall_wait');advance=false;
-    assert.equal(snapshots,4);assert.match(timeout.content[0].text,/tincall_wait/);assert.doesNotMatch(timeout.content[0].text,/get_call|cursor|epoch/);
+    assert.equal(snapshots,3);assert.match(timeout.content[0].text,/tincall_wait/);assert.doesNotMatch(timeout.content[0].text,/get_call|cursor|epoch/);
     assert.equal((await tool('tincall_reply',{call:callReference(id),text:'Complete text',wait_for_input:false})).isError,false);
     await tool('tincall_end',{call:callReference(id)});
   } finally {context.mock.restoreAll();store.close();rmSync(directory,{recursive:true,force:true});}
@@ -152,7 +152,7 @@ test('MCP contact wait preferences survive restart and apply to dial, wait and r
     context.mock.method(globalThis,'setTimeout',callback=>{queueMicrotask(callback);return 0;});
     await timed('tincall_call',{},100);
     let call=(await store.command(owner,'call.current')).call;
-    await store.command(owner,'call.accept',{request_id:crypto.randomUUID(),call_id:call.id,epoch:call.epoch});
+    assert.equal((await post(`/calls/${call.id}/answer`,{request_id:crypto.randomUUID(),epoch:call.epoch})).status,200);
     await tool('tincall_wait'); // Deliver the connection event before waiting for speech.
     await timed('tincall_wait',{},100);
     await timed('tincall_reply',{call:callReference(call.id),text:'Synthetic reply'},100);
@@ -162,4 +162,41 @@ test('MCP contact wait preferences survive restart and apply to dial, wait and r
     for(const timeout_seconds of [0,131,1.5])assert.equal((await tool('tincall_reply',{call:callReference(call.id),text:'Must not send',timeout_seconds})).isError,true);
     assert.equal((await store.command(owner,'call.record',{call_id:call.id})).messages.some(message=>message.text==='Must not send'),false);
   } finally {context.mock.restoreAll();store.close();rmSync(directory,{recursive:true,force:true});}
+});
+
+test('the phone defers the MCP opening: AI dial returns the first words, and call.open starts a phone-dialed opening',async()=>{
+  const directory=mkdtempSync(join(tmpdir(),'tincall-deferred-opening-')),owner=crypto.randomUUID();
+  const store=createSQLiteStore({clients:[{token:'phone',owner_id:owner},{token:'contact',owner_id:owner,contact_id:'visible'}]},join(directory,'calls.sqlite'));
+  const service=createConnector({store,config:{bindings:[{owner_id:owner,contact_id:'visible',mode:'tools'}]},schedule:()=>{}});
+  const post=(path,payload,token='phone')=>service.handle(new Request('https://fixture.invalid'+path,{method:'POST',
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json, text/event-stream'},body:JSON.stringify(payload)}));
+  const tool=async(name,args={})=>(await (await post('/mcp',{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}},'contact')).json()).result;
+  const snapshot=id=>store.mcpCommand(owner,null,'snapshot',{call_id:id});
+  try {
+    // AI dials; the phone answers with a deferred opening and speaks first.
+    const dial=tool('tincall_call',{contact_id:'visible',timeout_seconds:10});
+    let call;
+    for(let attempt=0;attempt<100 && !call;attempt++){call=(await store.command(owner,'call.current')).call;if(!call)await new Promise(resolve=>setTimeout(resolve,20));}
+    assert.equal((await post(`/calls/${call.id}/answer`,{request_id:crypto.randomUUID(),epoch:call.epoch,opening:'deferred'})).status,200);
+    assert.equal((await snapshot(call.id)).reply,null);
+    const message_id=crypto.randomUUID();
+    assert.equal((await post(`/calls/${call.id}/input`,{request_id:message_id,message_id,text:'Synthetic first words',epoch:0})).status,200);
+    const dialed=await dial;
+    assert.equal(dialed.isError,false,JSON.stringify(dialed));
+    assert.match(dialed.content.map(item=>item.text??'').join('\n'),/Synthetic first words/);
+    // A late open after the first words never creates an opening.
+    assert.equal((await post(`/calls/${call.id}/open`,{request_id:crypto.randomUUID()})).status,200);
+    assert.equal((await snapshot(call.id)).reply.kind,'input');
+    await post(`/calls/${call.id}/end`,{request_id:crypto.randomUUID(),epoch:1});
+
+    // The phone dials with a deferred opening; only call.open creates the opening target.
+    const id=crypto.randomUUID();
+    assert.equal((await post('/calls',{request_id:id,call_id:id,contact_id:'visible',source:'mcp',opening:'deferred'})).status,200);
+    assert.equal((await snapshot(id)).reply,null);
+    assert.equal((await post(`/calls/${id}/open`,{request_id:crypto.randomUUID()},'contact')).status,403);
+    assert.equal((await post(`/calls/${id}/open`,{request_id:crypto.randomUUID()})).status,200);
+    assert.equal((await snapshot(id)).reply.kind,'opening');
+    assert.match((await tool('tincall_wait',{timeout_seconds:1})).content.map(item=>item.text??'').join('\n'),/call: /);
+    assert.equal((await post('/calls',{request_id:crypto.randomUUID(),call_id:crypto.randomUUID(),contact_id:'visible',source:'mcp',opening:'now'})).status,400);
+  } finally {store.close();rmSync(directory,{recursive:true,force:true});}
 });

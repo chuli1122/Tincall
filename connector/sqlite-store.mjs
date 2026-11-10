@@ -18,6 +18,7 @@ import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { ConnectorError } from '../supabase/functions/_shared/tincall/service.mjs';
+import { summarizeRecord } from '../supabase/functions/_shared/tincall/protocol.mjs';
 
 export const defaultDatabasePath = fileURLToPath(
   new URL('./data/tincall.sqlite', import.meta.url),
@@ -2282,6 +2283,15 @@ export function createSQLiteStore(
         removeFile(temporary);
       }
       return Response.json({ ok: true });
+    },
+    recordSummaries(owner, ids = null) {
+      const wanted = ids ? new Set(ids.map((value) => value.toLowerCase())) : null;
+      return all(
+        'SELECT id,record FROM tincall_records WHERE owner_id=? AND deleted=0 AND record IS NOT NULL ORDER BY id',
+        owner,
+      )
+        .filter((row) => !wanted || wanted.has(row.id.toLowerCase()))
+        .map((row) => summarizeRecord(row.id, row.record));
     },
     async deleteRecordMedia(owner, record, preserve = []) {
       if (![owner, record].every((value) => UUID.test(value)))

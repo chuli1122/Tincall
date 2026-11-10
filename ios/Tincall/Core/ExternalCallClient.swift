@@ -327,11 +327,12 @@ final class ExternalCallClient {
     }
 
     func answer(connection: ConnectionProfile, callID: UUID, requestID: UUID, epoch: Int, expressionPrompt: String, userName: String = "",
-                timeAwarenessEnabled: Bool = false) async throws -> ExternalCallState {
+                timeAwarenessEnabled: Bool = false, deferOpening: Bool = false) async throws -> ExternalCallState {
         let result: CallResponse = try await request(connection, path: ["calls", callID.uuidString, "answer"], method: "POST",
                                                     body: AnswerRequest(request_id: requestID, epoch: epoch, expression_prompt: expressionPrompt, user_name: userName,
                                                         time_awareness_enabled: timeAwarenessEnabled ? true : nil,
-                                                        time_zone: timeAwarenessEnabled ? TimeZone.autoupdatingCurrent.identifier : nil))
+                                                        time_zone: timeAwarenessEnabled ? TimeZone.autoupdatingCurrent.identifier : nil,
+                                                        opening: deferOpening ? "deferred" : nil))
         guard result.call.id == callID, result.call.status == "active" else { throw TincallError(message: String(localized: "连接端没有确认接听此通话")) }
         return result.call
     }
@@ -389,14 +390,23 @@ final class ExternalCallClient {
         guard result.ok else { throw TincallError(message: String(localized: "连接端没有确认移除设备")) }
     }
 
-    func create(connection: ConnectionProfile, role: CallRole, callID: UUID, expressionPrompt: String, userName: String = "") async throws -> ExternalCallState {
+    func create(connection: ConnectionProfile, role: CallRole, callID: UUID, expressionPrompt: String, userName: String = "",
+                deferOpening: Bool = false) async throws -> ExternalCallState {
         try validate(connection, role: role)
         let result: CallResponse = try await request(connection, path: ["calls"], method: "POST", body:
             CreateRequest(request_id: callID, call_id: callID, contact_id: role.externalRoleID ?? "", source: role.effectiveCallMode.rawValue, expression_prompt: expressionPrompt, user_name: userName,
                 time_awareness_enabled: role.timeAwarenessEnabled == true ? true : nil,
-                time_zone: role.timeAwarenessEnabled == true ? TimeZone.autoupdatingCurrent.identifier : nil), logContext: RequestLogContext(callID: callID))
+                time_zone: role.timeAwarenessEnabled == true ? TimeZone.autoupdatingCurrent.identifier : nil,
+                opening: deferOpening ? "deferred" : nil), logContext: RequestLogContext(callID: callID))
         guard result.call.id == callID else { throw TincallError(message: String(localized: "连接端返回了不匹配的通话标识")) }
         return result.call
+    }
+
+    /// Lets the contact speak first after a deferred opening; a no-op once the person has spoken.
+    func openTurn(connection: ConnectionProfile, callID: UUID) async throws {
+        let result: CallResponse = try await request(connection, path: ["calls", callID.uuidString, "open"], method: "POST",
+            body: OpenRequest(request_id: UUID()), logContext: RequestLogContext(callID: callID))
+        guard result.call.id == callID else { throw TincallError(message: String(localized: "连接端返回了不匹配的通话标识")) }
     }
 
     func input(connection: ConnectionProfile, callID: UUID, pending: ExternalPendingInput, text: String, images: [ConnectorMessageImage] = [],
@@ -733,14 +743,15 @@ final class ExternalCallClient {
     }
     private struct DeviceResponse: Decodable { let ok: Bool; let live_activity_push: Bool?; let call_access_expiry: Bool? }
     private struct ActivityPushResponse: Decodable { let accepted_by_apns: Bool }
-    private struct AnswerRequest: Encodable { let request_id: UUID; let epoch: Int; let expression_prompt: String; let user_name: String; let time_awareness_enabled: Bool?; let time_zone: String? }
+    private struct AnswerRequest: Encodable { let request_id: UUID; let epoch: Int; let expression_prompt: String; let user_name: String; let time_awareness_enabled: Bool?; let time_zone: String?; let opening: String? }
+    private struct OpenRequest: Encodable { let request_id: UUID }
     private struct DeviceRequest: Encodable {
         let request_id: UUID; let device_id: UUID; let device_token: String; let environment: String
         let live_activity_start_token: String?
         let calls_valid_until: String?
     }
     private struct RemoveDeviceRequest: Encodable { let request_id: UUID; let device_id: UUID }
-    private struct CreateRequest: Encodable { let request_id: UUID; let call_id: UUID; let contact_id: String; let source: String; let expression_prompt: String; let user_name: String; let time_awareness_enabled: Bool?; let time_zone: String? }
+    private struct CreateRequest: Encodable { let request_id: UUID; let call_id: UUID; let contact_id: String; let source: String; let expression_prompt: String; let user_name: String; let time_awareness_enabled: Bool?; let time_zone: String?; let opening: String? }
     private struct InputRequest: Encodable { let request_id: UUID; let message_id: UUID; let epoch: Int; let text: String; let images: [ConnectorMessageImage]? }
     private struct SummaryRequest: Encodable { let request_id: UUID; let text: String }
     private struct ControlRequest: Encodable { let request_id: UUID; let epoch: Int; let reason: String }

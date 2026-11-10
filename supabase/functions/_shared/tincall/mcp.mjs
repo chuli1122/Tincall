@@ -19,7 +19,7 @@ const waitProperties = {
   timeout_seconds:{type:'integer',minimum:1,maximum:MCP_WAIT_MAX_SECONDS,default:MCP_WAIT_DEFAULT_SECONDS},
 };
 const toolDefinitions = [
-  ['tincall_call', 'Call the linked phone and wait for the person to answer. When answered, speak by calling tincall_reply with your complete text. If the wait times out, call tincall_wait to keep waiting.', {contact_id:{type:'string'},timeout_seconds:waitProperties.timeout_seconds}, ['contact_id']],
+  ['tincall_call', 'Call the linked phone and wait until it is your turn. When answered, speak first by calling tincall_reply with your complete text; if the person speaks first, the result contains their message instead. If the wait times out, call tincall_wait to keep waiting.', {contact_id:{type:'string'},timeout_seconds:waitProperties.timeout_seconds}, ['contact_id']],
   ['tincall_get_call', 'Read saved conversation history and current call state using the 8-character call ID, or omit it to find the current call. An ended call may also have a summary. For live conversation use tincall_wait; after a timeout keep waiting. History is paged, newest page first.', {call_id:{type:'string',description:'8-character call ID from a call result or history list.'},limit:{type:'integer',minimum:1,maximum:100,default:50},before_sequence:{type:'integer',minimum:1}}, []],
   ['tincall_wait', 'Wait for the next message, phone answer or hangup. Reuse the short call marker for this task; omit call only to discover a new call. After a timeout keep waiting.', {call:{type:'string',minLength:8,maxLength:8},timeout_seconds:waitProperties.timeout_seconds}, []],
   ['tincall_reply', 'Speak your complete reply, then wait for the next input by default. Omit wait_for_input; set it to false only to return immediately, such as before tincall_end. Reuse the 8-character call marker returned when this call was opened or discovered. Later messages do not repeat it. Never substitute a new call marker to retry an old reply or hangup.', {call:{type:'string',minLength:8,maxLength:8},text:{type:'string'},wait_for_input:{type:'boolean',default:true,description:'Omit to wait for the next input. Set false only to return immediately.'},timeout_seconds:waitProperties.timeout_seconds}, ['call','text']],
@@ -36,7 +36,7 @@ export function callReference(id) {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_');
 }
 // Owns reply targets, long waits, and both MCP transports, including wake subscriptions.
-export function createMCP({store, command, bindingFor, ensureOpening, schedule, mcpContent}) {
+export function createMCP({store, command, bindingFor, schedule, mcpContent}) {
   async function callWaitTimeout(principal, args, call) {
     if (args.timeout_seconds !== undefined) return waitTimeout(args.timeout_seconds);
     const binding = await bindingFor(principal.owner_id, call.contact_id);
@@ -44,11 +44,8 @@ export function createMCP({store, command, bindingFor, ensureOpening, schedule, 
   }
   async function mcpSnapshot(principal, payload, signal) {
     const read = () => store.mcpCommand(principal.owner_id, principal.contact_id ?? null, 'snapshot', payload, {signal});
-    let value = await read();
-    if (value.call?.status === 'active' && value.call.source === 'mcp' && value.call.epoch === 0) {
-      await ensureOpening(principal, value.call);
-      value = await read();
-    }
+    // The phone decides when an opening target exists; reads never create one.
+    const value = await read();
     return {...value,call:publicCall(value.call),reply:value.reply ? {...value.reply,reply_to:replyReference(value.reply)} : null};
   }
   async function boundCallID(principal,args) {
@@ -96,7 +93,8 @@ export function createMCP({store, command, bindingFor, ensureOpening, schedule, 
       if (principal.wake_bridge) return {...result,event:value.has_more?'input':value.reply?(value.reply.kind==='opening'?'answered':'input'):'idle',
         message:value.reply || value.has_more ? '由接入程序先取齐本轮输入，再携带消息、图片、语音要求和回复目标启动 AI；AI 通过 tincall_reply 回复后结束任务，无需再读取或等待输入。':'当前没有待回复的输入，不启动 AI，等待下一次唤醒事件。'};
       if (value.messages.length || value.has_more) return {...result,event:'input'};
-      if (value.call.status==='active' && cursor.epoch<0) return {...result,event:'answered'};
+      // A deferred opening waits until the phone opens the turn or the person speaks.
+      if (value.call.status==='active' && cursor.epoch<0 && value.reply?.kind==='opening') return {...result,event:'answered'};
       // Internal turn changes do not finish a wait for the next spoken message.
       const remaining = deadline - Date.now();
       if (remaining <= 0) return {...result,event:'timeout',

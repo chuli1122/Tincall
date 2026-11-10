@@ -100,6 +100,12 @@ enum CallMode: String, Codable, CaseIterable, Sendable {
     case standalone, mcp, backend
 }
 
+/// Who speaks first after a call connects, in either direction.
+enum CallOpeningSpeaker: String, Codable, CaseIterable, Sendable {
+    case contact, user, wait
+    static let waitRange = 1...10
+}
+
 /// This entire value is secret and may only be persisted in Keychain.
 struct MCPRoleConfiguration: Codable, Equatable, Sendable {
     let mcp_url: URL
@@ -156,6 +162,10 @@ struct CallRole: Identifiable, Codable, Equatable, Sendable {
     var systemPrompt: String = ""
     /// Missing in existing contacts keeps timestamp injection disabled.
     var timeAwarenessEnabled: Bool?
+    /// Missing in existing contacts waits briefly before the contact speaks.
+    var openingSpeaker: CallOpeningSpeaker?
+    /// Silence before the contact speaks when `openingSpeaker` is `.wait`.
+    var openingWaitSeconds: Int?
     var historySummaryCount: Int?
     /// Unicode character budget, deliberately not advertised as an exact token count.
     var contextCharacterBudget: Int?
@@ -176,6 +186,24 @@ struct CallRole: Identifiable, Codable, Equatable, Sendable {
 
     var effectiveCallMode: CallMode { callMode ?? .standalone }
     var effectiveMCPWaitTimeoutSeconds: Int { min(130, max(1, mcpWaitTimeoutSeconds ?? 120)) }
+    var effectiveOpeningSpeaker: CallOpeningSpeaker { openingSpeaker ?? .wait }
+    var effectiveOpeningWaitSeconds: Int {
+        min(CallOpeningSpeaker.waitRange.upperBound, max(CallOpeningSpeaker.waitRange.lowerBound, openingWaitSeconds ?? 3))
+    }
+    /// Backend generation starts only from input. Ordinary MCP cannot wake the AI for a phone-dialed call.
+    var supportsOpeningSpeaker: Bool { effectiveCallMode != .backend }
+    func canContactOpen(incoming: Bool) -> Bool {
+        effectiveCallMode == .standalone || (effectiveCallMode == .mcp && (incoming || mcpWakeBridgeEnabled == true))
+    }
+    /// Delay after connecting before the contact speaks; nil means it waits for the person.
+    func openingDelay(incoming: Bool) -> Duration? {
+        guard canContactOpen(incoming: incoming) else { return nil }
+        switch effectiveOpeningSpeaker {
+        case .contact: return .zero
+        case .user: return nil
+        case .wait: return .seconds(effectiveOpeningWaitSeconds)
+        }
+    }
 
     /// Each newly registered role has its own stable identity, independent of connection defaults.
     var mcpContactID: String {
@@ -398,6 +426,8 @@ struct CallRecord: Identifiable, Codable, Equatable, Sendable {
     var recordedActiveDuration: TimeInterval?
     /// An interrupted local session can finish without a known real ending timestamp.
     var endedAbnormally: Bool?
+    /// true when the contact called, false when the user dialed; nil for records saved before this was kept.
+    var incoming: Bool?
 
     var isFinished: Bool { endedAt != nil || endedAbnormally == true }
 

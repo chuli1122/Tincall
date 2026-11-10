@@ -36,6 +36,7 @@ final class CloudSyncClient {
     private var authenticatedConnection: ConnectionProfile?
     private var authenticatedToken: String?
     private(set) var supportsBackupOnlyDeletion = false
+    private(set) var supportsMediaRemoval = false
     var isAutomaticSync = false
 
     init(credentials: CredentialStore = CredentialStore(), configuration: URLSessionConfiguration = .ephemeral,
@@ -57,10 +58,12 @@ final class CloudSyncClient {
         authenticatedConnection = connection
         authenticatedToken = try token(connection)
         supportsBackupOnlyDeletion = false
-        struct Capabilities: Decodable { let owner_id: UUID?; let backup_only_deletion: Bool? }
+        supportsMediaRemoval = false
+        struct Capabilities: Decodable { let owner_id: UUID?; let backup_only_deletion: Bool?; let record_media_removal: Bool? }
         let response: Capabilities = try await json(connection, path: ["capabilities"])
         guard let owner = response.owner_id else { throw TincallError(message: String(localized: "此连接未提供所属账户的云端备份能力")) }
         supportsBackupOnlyDeletion = response.backup_only_deletion == true
+        supportsMediaRemoval = response.record_media_removal == true
         return owner
     }
 
@@ -126,14 +129,36 @@ final class CloudSyncClient {
         return remote
     }
 
+    func usage(connection: ConnectionProfile) async throws -> CloudSyncUsage {
+        try await json(connection, path: ["records", "usage"])
+    }
+
+    /// Removes recordings and/or images from one cloud copy; the text stays. Retrying with the
+    /// same request ID replays the write and finishes object cleanup.
+    func removeMedia(connection: ConnectionProfile, id: UUID, requestID: UUID, expectedRevision: Int,
+                     audio: Bool, images: Bool) async throws -> CloudSyncRemote {
+        guard supportsMediaRemoval else { throw TincallError(message: String(localized: "当前云端尚不支持单独删除录音或图片，请先更新云端服务。")) }
+        struct Body: Encodable { let request_id: UUID; let expected_revision: Int; let audio: Bool; let images: Bool }
+        struct Response: Decodable { let record: WireRemote }
+        let body = try JSONEncoder().encode(Body(request_id: requestID, expected_revision: expectedRevision, audio: audio, images: images))
+        let result: Response = try await json(connection, path: ["records", id.uuidString, "remove-media"], method: "POST", body: body)
+        var remote = result.record.local
+        guard remote.id == id, !remote.deleted, let document = remote.record else {
+            throw TincallError(message: String(localized: "云端返回了不匹配的记录，请刷新后重试"))
+        }
+        remote.record = try document.validated(recordID: id)
+        return remote
+    }
+
     private struct WireRemote: Decodable {
         let id: UUID
         let revision: Int
         let deleted: Bool
         let updated_at: String
         let record: CloudSyncWireDocument?
+        let summary: CloudSyncRemoteSummary?
         var local: CloudSyncRemote {
-            CloudSyncRemote(id: id, revision: revision, deleted: deleted, updated_at: updated_at, record: record?.document)
+            CloudSyncRemote(id: id, revision: revision, deleted: deleted, updated_at: updated_at, record: record?.document, summary: summary)
         }
     }
 

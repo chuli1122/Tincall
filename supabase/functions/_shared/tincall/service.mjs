@@ -19,9 +19,9 @@ export function createConnector({store, config, schedule = promise => promise.ca
   const images = createMessageImages(store);
   const {linkedCallRecord, mcpContent} = images;
   const {runOwner, runWorker} = createCallJobs({store, config, fetcher, backendMessages: images.backendMessages});
-  const {command, bindingFor, upsertMCPRole, ensureOpening, waitForEvents} =
+  const {command, bindingFor, upsertMCPRole, waitForEvents} =
     createCallCommands({store, config, schedule, runOwner, fetcher, images});
-  const {mcp, sse, ssePost, wakeEvents, waitForInput} = createMCP({store, command, bindingFor, ensureOpening, schedule, mcpContent});
+  const {mcp, sse, ssePost, wakeEvents, waitForInput} = createMCP({store, command, bindingFor, schedule, mcpContent});
 
   async function incomingEvents(request,principal) {
     ensure(request.method==='GET','method_not_allowed',405);
@@ -177,7 +177,7 @@ export function createConnector({store, config, schedule = promise => promise.ca
           if (!bindings.has(binding.contact_id) || bindings.get(binding.contact_id).mode === 'tools') bindings.set(binding.contact_id,binding);
         }
         return json({version:1,server_version:serverVersion.server_version,...(!principal.contact_id?{owner_id:principal.owner_id}:{}),events:'poll',incoming_events:'sse',wake_bridge:'sse',max_event_page:100,reply_protocol:'append_only',
-          mcp_role_management:!principal.contact_id,mcp_oauth:true,backup_only_deletion:!principal.contact_id,schedule_controls:true,
+          mcp_role_management:!principal.contact_id,mcp_oauth:true,backup_only_deletion:!principal.contact_id,record_media_removal:!principal.contact_id,schedule_controls:true,
           bindings:[...bindings.values()].filter(b=>!principal.contact_id || b.contact_id===principal.contact_id).map(b=>{
             let configured = false;
             try { validateBinding(b); configured = true; }
@@ -192,6 +192,7 @@ export function createConnector({store, config, schedule = promise => promise.ca
         else if(path==='/calls')action='call.list';
         else if(path==='/schedules')action='schedule.list';
         else if(path==='/records') {action='record.list';payload={after:url.searchParams.get('after') ?? undefined,after_id:url.searchParams.get('after_id') ?? undefined};}
+        else if(path==='/records/usage')action='record.usage';
         else {const match=path.match(/^\/calls\/([^/]+)\/(events|record|inputs)$/);const record=path.match(/^\/records\/([^/]+)$/);
           if(match) {action=`call.${match[2]}`;payload={call_id:match[1],...(match[2]==='events'?{after:Number(url.searchParams.get('after') ?? 0),limit:Number(url.searchParams.get('limit') ?? 100)}:{})};}
           else if(record){action='record.get';payload={record_id:record[1]};}
@@ -206,9 +207,9 @@ export function createConnector({store, config, schedule = promise => promise.ca
         else if(path==='/schedules')action='schedule.put';
         else if(path==='/schedules/remove')action='schedule.delete';
         else if(path==='/schedules/enabled')action='schedule.enabled';
-        else {const match=path.match(/^\/calls\/([^/]+)\/(input|interrupt|end|answer|reply|summary|activity)$/);const record=path.match(/^\/records\/([^/]+)(\/delete(?:-backup)?)?$/);
+        else {const match=path.match(/^\/calls\/([^/]+)\/(input|interrupt|end|answer|reply|summary|activity|open)$/);const record=path.match(/^\/records\/([^/]+)(\/delete(?:-backup)?|\/remove-media)?$/);
           if(match){payload.call_id=match[1];action=match[2]==='answer'?'call.accept':match[2]==='reply'?(payload.complete?'reply.completed':'reply.delta'):match[2]==='summary'?'summary.put':`call.${match[2]}`;}
-          else if(record){payload.record_id=record[1];action=record[2]?'record.delete':'record.put';
+          else if(record){payload.record_id=record[1];action=record[2]==='/remove-media'?'record.media_remove':record[2]?'record.delete':'record.put';
             delete payload.preserve_call_media;if(record[2]==='/delete-backup')payload.preserve_call_media=true;}
         }
       }

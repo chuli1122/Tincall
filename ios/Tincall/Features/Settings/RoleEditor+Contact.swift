@@ -29,14 +29,12 @@ extension RoleEditor {
                 Text("姓名")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("怎么称呼 TA", text: Binding(get: {
+                SettingsTextField(placeholder: String(localized: "怎么称呼 TA"), text: Binding(get: {
                     role.usesSystemContactDetails ? role.displayName : nameDraft
                 }, set: {
                     nameDraft = $0
                     manualNameEdited = true
-                }))
-                .font(.title2.weight(.semibold))
-                .textContentType(.name)
+                }), textStyle: .title2, weight: .semibold, contentType: .name)
                 .disabled(role.usesSystemContactDetails || isLinking)
                 .accessibilityLabel("姓名")
                 Rectangle().fill(Color.primary.opacity(0.3)).frame(height: 0.75)

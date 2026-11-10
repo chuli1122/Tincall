@@ -36,6 +36,8 @@ struct TincallRootView: View {
     @State private var showsDataSharingReview = false
     @State private var systemCallError: String?
     @State private var systemPhoneURL: URL?
+    @State private var updateReminder = UpdateReminder()
+    @State private var opensCloudSettings = false
     private var callActivity: CallActivityController { runtime.callActivity }
     @State private var configurationIssue: String? = String(localized: "请选择联系人并配置连接")
 
@@ -90,7 +92,9 @@ struct TincallRootView: View {
                                                 onRequestSummary: summaryCallback(store: records, configuration: configuration, coordinator: coordinator),
                                                 canRequestSummary: summaryAvailability(store: records, configuration: configuration),
                                                 isDockPage: true, incomingController: runtime.incoming,
-                                                cloudSync: runtime.cloudSync, cloudSyncLoadingError: runtime.cloudSyncLoadingError)
+                                                cloudSync: runtime.cloudSync, cloudSyncLoadingError: runtime.cloudSyncLoadingError,
+                                                opensCloud: $opensCloudSettings,
+                                                onCloudOpened: { dockPresentation.setVisible(false, reduceMotion: reduceMotion) })
                                 .background(dockNavigationObserver(for: .settings))
                         }
                         .toolbar(.hidden, for: .tabBar)
@@ -220,6 +224,35 @@ struct TincallRootView: View {
                 selectedPage = .settings
             }
             #endif
+            if coordinator?.isCallActive != true {
+                await updateReminder.check(connections: configuration?.connections ?? [])
+            }
+        }
+        .alert(updateReminderTitle, isPresented: Binding(get: {
+            updateReminder.notice != nil && coordinator?.isCallActive != true && !showsDataSharingReview
+        }, set: { if !$0 { updateReminder.dismiss() } })) {
+            Button("稍后", role: .cancel) { updateReminder.dismiss() }
+            switch updateReminder.notice {
+            case .app(_, _, let url):
+                Button("更新") { updateReminder.dismiss(); UIApplication.shared.open(url) }
+            case .cloud:
+                Button("去更新") {
+                    updateReminder.dismiss()
+                    selectedPage = .settings
+                    opensCloudSettings = true
+                }
+            case nil:
+                EmptyView()
+            }
+        } message: {
+            switch updateReminder.notice {
+            case .app(let version, let notes, _):
+                Text(notes.map { String($0.prefix(600)) } ?? String(localized: "Tincall \(version) 已发布。"))
+            case .cloud(let name):
+                Text("「\(name)」的版本较旧，部分新功能需要更新后才能使用。") + Text("\n") + Text("手动部署的服务请在原电脑或服务器更新。")
+            case nil:
+                EmptyView()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
@@ -230,6 +263,14 @@ struct TincallRootView: View {
             Task { await configuration?.refreshLinkedContacts() }
         }
         .background(RootKeyboardDismissal())
+    }
+
+    private var updateReminderTitle: String {
+        switch updateReminder.notice {
+        case .app(let version, _, _): String(localized: "发现新版本 \(version)")
+        case .cloud: String(localized: "云端服务需要更新")
+        case nil: ""
+        }
     }
 
     private func presentActiveCall(animated: Bool = false) {

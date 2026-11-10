@@ -101,6 +101,50 @@ extension RoleEditor {
         }
     }
 
+    var openingSpeakerCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text("接通后首先发言")
+                    DeploymentHelpButton(title: "接通后首先发言", detail: "打出和接听都按此设置。选择静默后由对方发言时，可填写 1–10 秒的静默时长，默认 3 秒；超出范围会自动调整。静默期间你开始说话或打字，就由你先发言。", systemImage: "info.circle")
+                    Spacer(minLength: 0)
+                    Menu {
+                        Picker(String(localized: "接通后首先发言"), selection: Binding(
+                            get: { role.effectiveOpeningSpeaker }, set: { role.openingSpeaker = $0 })) {
+                            ForEach(CallOpeningSpeaker.allCases, id: \.self) { Text(openingSpeakerTitle($0)).tag($0) }
+                        }
+                    } label: {
+                        presetMenuLabel(openingSpeakerTitle(role.effectiveOpeningSpeaker))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("接通后首先发言")
+                    .accessibilityValue(openingSpeakerTitle(role.effectiveOpeningSpeaker))
+                }
+                if role.effectiveOpeningSpeaker == .wait {
+                    SettingsSecondsRow("静默时长", placeholder: "3", value: Binding(
+                        get: { role.effectiveOpeningWaitSeconds },
+                        set: { role.openingWaitSeconds = min(CallOpeningSpeaker.waitRange.upperBound, max(CallOpeningSpeaker.waitRange.lowerBound, $0)) }
+                    )) {
+                        Text("静默时长")
+                    }
+                }
+                if !role.canContactOpen(incoming: false) {
+                    Text("普通 MCP 由你打出时无法唤醒对方，接通后请你先发言。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    func openingSpeakerTitle(_ speaker: CallOpeningSpeaker) -> String {
+        switch speaker {
+        case .contact: String(localized: "对方先发言")
+        case .user: String(localized: "我先发言")
+        case .wait: String(localized: "静默后由对方发言")
+        }
+    }
+
     func presetMenuLabel(_ name: String) -> some View {
         SettingsSelectionLabel(value: name)
         .frame(minHeight: 31)

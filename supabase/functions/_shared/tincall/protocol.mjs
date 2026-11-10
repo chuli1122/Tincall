@@ -73,3 +73,43 @@ export function publicCall(call) {
   const {tts_expression_prompt, voice_instructions_sent, phone_seen_at, mcp_read_sequence, mcp_read_epoch, mcp_dial_until, ...visible} = call;
   return visible;
 }
+
+const recordMessages = document => {
+  const messages = document?.call?.messages ?? document?.messages;
+  return Array.isArray(messages) ? messages : [];
+};
+const byteCount = value => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+
+/// Same facts as the tincall_record_summaries SQL function, for stores without it.
+export function summarizeRecord(id, document) {
+  const media = Array.isArray(document?.media) ? document.media : [];
+  const images = recordMessages(document).flatMap(message => Array.isArray(message?.images) ? message.images : []);
+  return {
+    id,
+    role_name: typeof document?.call?.roleName === 'string' ? document.call.roleName : null,
+    started_at: typeof document?.call?.startedAt === 'number' ? document.call.startedAt : null,
+    audio_count: media.length, audio_bytes: media.reduce((sum, item) => sum + byteCount(item?.bytes), 0),
+    image_count: images.length, image_bytes: images.reduce((sum, item) => sum + byteCount(item?.bytes), 0),
+  };
+}
+
+/// A backup document without its recordings and/or images; text and summary are unchanged.
+export function withoutRecordMedia(document, {audio, images}) {
+  const next = structuredClone(document);
+  if (audio) next.media = [];
+  if (images) {
+    const strip = messages => Array.isArray(messages) ? messages.map(({images: _images, ...message}) => message) : messages;
+    if (next.call?.messages) next.call.messages = strip(next.call.messages);
+    if (next.messages) next.messages = strip(next.messages);
+  }
+  return next;
+}
+
+/// Object ids a backup document still references (recordings and images).
+export function recordMediaIDs(document) {
+  const media = Array.isArray(document?.media) ? document.media : [];
+  return [
+    ...media.map(item => item?.object_id),
+    ...recordMessages(document).flatMap(message => Array.isArray(message?.images) ? message.images.map(image => image?.id) : []),
+  ].filter(value => typeof value === 'string');
+}

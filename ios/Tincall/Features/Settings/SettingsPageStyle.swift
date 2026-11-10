@@ -261,6 +261,61 @@ struct SettingsSectionHeading: View {
     }
 }
 
+/// A plain text field that never overwrites itself while Chinese / Japanese input is still composing.
+/// SwiftUI's TextField can re-apply its text during a page update and commit the first pinyin letter.
+struct SettingsTextField: UIViewRepresentable {
+    let placeholder: String
+    @Binding var text: String
+    var textStyle: UIFont.TextStyle = .subheadline
+    var weight: UIFont.Weight = .regular
+    var returnKey: UIReturnKeyType = .done
+    /// Searches and identifiers: no auto-capitalization or autocorrect.
+    var plain = false
+    var contentType: UITextContentType? = nil
+
+    func makeUIView(context: Context) -> UITextField {
+        let field = UITextField()
+        field.placeholder = placeholder
+        field.text = text
+        let base = UIFont.preferredFont(forTextStyle: textStyle, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large))
+        field.font = UIFontMetrics(forTextStyle: textStyle).scaledFont(for: .systemFont(ofSize: base.pointSize, weight: weight))
+        field.adjustsFontForContentSizeCategory = true
+        field.textColor = .label
+        field.tintColor = UIColor(Color.accentColor)
+        field.returnKeyType = returnKey
+        field.textContentType = contentType
+        if plain { field.autocapitalizationType = .none; field.autocorrectionType = .no }
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        field.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .editingChanged)
+        field.addTarget(context.coordinator, action: #selector(Coordinator.done(_:)), for: .editingDidEndOnExit)
+        return field
+    }
+
+    func updateUIView(_ field: UITextField, context: Context) {
+        context.coordinator.text = $text
+        field.placeholder = placeholder
+        field.isEnabled = context.environment.isEnabled
+        guard field.markedTextRange == nil, field.text != text else { return }
+        field.text = text
+    }
+
+    /// One line tall, as wide as offered; without this SwiftUI lets the field fill all available height.
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView field: UITextField, context: Context) -> CGSize? {
+        let natural = field.intrinsicContentSize
+        return CGSize(width: proposal.width ?? natural.width, height: natural.height)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        @objc func changed(_ field: UITextField) { text.wrappedValue = field.text ?? "" }
+        @objc func done(_ field: UITextField) { field.resignFirstResponder() }
+    }
+}
+
 struct SettingsField<Content: View>: View {
     let title: String
     var help: LocalizedStringResource? = nil
@@ -376,6 +431,42 @@ struct SettingsCredentialField: View {
             try CredentialStore().read(connectionID: connectionID, field: field)
         }
         .accessibilityHint(isReadOnly ? String(localized: "仅供查看和复制，不可修改") : String(localized: "留空保存会保留原来的密钥和保存时间"))
+    }
+}
+
+/// A seconds field whose whole row starts editing, including the unit, with the cursor at the end.
+struct SettingsSecondsRow<Label: View>: View {
+    let title: LocalizedStringResource
+    let placeholder: String
+    @Binding var value: Int
+    let label: Label
+    @FocusState private var isFocused: Bool
+
+    init(_ title: LocalizedStringResource, placeholder: String, value: Binding<Int>, @ViewBuilder label: () -> Label) {
+        self.title = title
+        self.placeholder = placeholder
+        _value = value
+        self.label = label()
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            label
+            Spacer(minLength: 0)
+            TextField(placeholder, value: $value, format: .number)
+                .focused($isFocused)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(width: 72)
+                .textFieldStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(Text(title))
+            Text("秒").foregroundStyle(.secondary)
+        }
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .onTapGesture { isFocused = true }
     }
 }
 
@@ -589,4 +680,71 @@ private struct SettingsBackGestureGuard: UIViewControllerRepresentable {
             return true
         }
     }
+}
+
+/// One segmented bar with a legend: categories in descending shades of the accent color,
+/// against an optional capacity (the remainder is drawn empty).
+struct SettingsUsageBar: View {
+    struct Segment: Identifiable {
+        let title: String
+        let bytes: Int64
+        var detail: String? = nil
+        var id: String { title }
+    }
+    let segments: [Segment]
+    var capacity: Int64? = nil
+    private static let shades: [Double] = [1, 0.62, 0.38, 0.2]
+
+    private var used: Int64 { segments.reduce(0) { $0 + max(0, $1.bytes) } }
+    private var scale: Int64 { max(capacity ?? used, used, 1) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(Self.format(used)).font(.title3.weight(.semibold).monospacedDigit())
+                if let capacity {
+                    Text("/ \(Self.format(capacity))").font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+                        Rectangle()
+                            .fill(Color.accentColor.opacity(Self.shades[min(index, Self.shades.count - 1)]))
+                            .frame(width: geometry.size.width * CGFloat(max(0, segment.bytes)) / CGFloat(scale))
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+            .frame(height: 14)
+            .background(Color.settingsSurface(lightOpacity: 0.055))
+            .overlay(Rectangle().strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.75))
+            .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
+                    legend(segment.title, detail: [segment.detail, Self.format(segment.bytes)].compactMap { $0 }.joined(separator: " · "),
+                           shade: Self.shades[min(index, Self.shades.count - 1)])
+                }
+                if let capacity {
+                    legend(String(localized: "剩余"), detail: Self.format(max(0, capacity - used)), shade: nil)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func legend(_ title: String, detail: String, shade: Double?) -> some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(shade.map { Color.accentColor.opacity($0) } ?? Color.settingsSurface(lightOpacity: 0.055))
+                .overlay(Rectangle().strokeBorder(Color.primary.opacity(shade == nil ? 0.12 : 0), lineWidth: 0.75))
+                .frame(width: 10, height: 10)
+            Text(title).font(.footnote)
+            Spacer(minLength: 8)
+            Text(detail).font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
+
+    static func format(_ bytes: Int64) -> String { ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
 }

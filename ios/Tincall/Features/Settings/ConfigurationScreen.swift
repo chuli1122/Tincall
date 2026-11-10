@@ -39,6 +39,10 @@ struct ConfigurationScreen: View {
     @State private var errorMessage: String?
     var cloudSync: CloudSyncStore? = nil
     var cloudSyncLoadingError: String? = nil
+    /// Set by a reminder to open Tincall Cloud directly; cleared when that page closes.
+    var opensCloud: Binding<Bool> = .constant(false)
+    /// That direct route bypasses the tab root's appearance, so the dock is hidden explicitly.
+    var onCloudOpened: () -> Void = {}
     @State private var activeSection: ConfigurationSection = .modelsAndVoices
     @State private var scrollHeight: CGFloat = 0
     @State private var sectionHeaderHeight: CGFloat = 0
@@ -69,6 +73,7 @@ struct ConfigurationScreen: View {
                 positions[$0].map { $0 <= headerTop + 0.5 } == true
             } ?? .modelsAndVoices
         }
+        .navigationDestination(isPresented: opensCloud) { cloudScreen.onAppear(perform: onCloudOpened) }
         .alert("保存失败", isPresented: Binding(get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } })) {
             Button("好", role: .cancel) { errorMessage = nil }
         } message: { Text(errorMessage ?? "") }
@@ -105,10 +110,7 @@ struct ConfigurationScreen: View {
                 }
                 scrollingSectionHeader(.connections)
                 settingsLink(String(localized: "Tincall 云端"), detail: String(localized: "服务连接 · 通话同步 · 后台与定时来电")) {
-                    CloudSyncScreen(configuration: store, sync: cloudSync, records: records,
-                                    syncLoadingError: cloudSyncLoadingError, isCallActive: isCallActive,
-                                    incomingController: incomingController, onSaveConnection: saveConnection,
-                                    onDeleteConnection: deleteConnection)
+                    cloudScreen
                 }
                 settingsLink(String(localized: "快捷指令"), detail: String(localized: "App 在后台时，也能随时发送文字和截图")) {
                     ShortcutSettingsScreen()
@@ -181,6 +183,13 @@ struct ConfigurationScreen: View {
         .padding(.top, 22)
         .padding(.bottom, 6)
         .accessibilityAddTraits(.isHeader)
+    }
+
+    private var cloudScreen: some View {
+        CloudSyncScreen(configuration: store, sync: cloudSync, records: records,
+                        syncLoadingError: cloudSyncLoadingError, isCallActive: isCallActive,
+                        incomingController: incomingController, onSaveConnection: saveConnection,
+                        onDeleteConnection: deleteConnection)
     }
 
     private func settingsLink<Destination: View>(_ title: String, detail: String,

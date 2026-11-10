@@ -183,6 +183,7 @@ final class TincallRuntime {
     }
     func setAppActive(_ active: Bool) {
         isAppActive = active
+        if !active { CloudKeepAlive.schedule() }
         if active { Task { await access.refresh() } }
         incoming.setAppActive(active)
         if active, let coordinator {
@@ -268,7 +269,9 @@ final class TincallAppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        CloudKeepAlive.register()
         TincallRuntime.shared.load()
+        CloudKeepAlive.schedule()
         return true
     }
 

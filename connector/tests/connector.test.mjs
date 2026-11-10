@@ -53,6 +53,7 @@ const mcpStore=createSupabaseStore({supabaseURL:'https://fixture.supabase.invali
   else if(url.endsWith('/rpc/tincall_mcp_sse_command'))query=`public.tincall_mcp_sse_command(${sqlQuote(p.p_action)},${sqlQuote(p.p_owner)}::uuid,${p.p_contact===null?'null':sqlQuote(p.p_contact)},${sqlQuote(JSON.stringify(p.p_payload))}::jsonb)`;
   else if(url.endsWith('/rpc/tincall_mcp_authenticate'))query=`public.tincall_mcp_authenticate(${sqlQuote(p.p_token)})`;
   else if(url.endsWith('/rpc/tincall_recent_calls'))query=`public.tincall_recent_calls(${sqlQuote(p.p_owner)}::uuid,${p.p_contact===null?'null':sqlQuote(p.p_contact)},${p.p_limit})`;
+  else if(url.endsWith('/rpc/tincall_record_summaries'))query=`public.tincall_record_summaries(${sqlQuote(p.p_owner)}::uuid,${p.p_ids===null?'null':`array[${p.p_ids.map(sqlQuote).join(',')}]`}::uuid[])`;
   else if(url.endsWith('/rpc/tincall_set_voice_prompt'))query=`public.tincall_set_voice_prompt(${sqlQuote(p.p_call)}::uuid,${sqlQuote(p.p_prompt)},${sqlQuote(p.p_owner)}::uuid)`;
   else if(url.endsWith('/rpc/tincall_claim_voice_instructions'))query=`public.tincall_claim_voice_instructions(${sqlQuote(p.p_call)}::uuid,${sqlQuote(p.p_owner)}::uuid)`;
   else if(url.endsWith('/rpc/tincall_command') || url.endsWith('/rpc/tincall_image_command') || url.endsWith('/rpc/tincall_schedule_command')) {
@@ -81,6 +82,7 @@ const store=sqlite?createSQLiteStore({clients:[{token:'test-owner',owner_id:owne
   claimVoiceInstructions:mcpStore.claimVoiceInstructions,
   media:mcpStore.media,
   deleteRecordMedia:mcpStore.deleteRecordMedia,
+  recordSummaries:mcpStore.recordSummaries,
 };
 const tasks=[];let upstream;let base;let connector;let generationCount=0;let cancelCount=0;let stall=false;let lastGeneration;
 before(async()=>{
@@ -103,6 +105,7 @@ before(async()=>{
   sql(readFileSync(new URL('../../supabase/migrations/202610220002_tincall_mcp_safety.sql',import.meta.url),'utf8'));
   sql(readFileSync(new URL('../../supabase/migrations/202610250001_tincall_mcp_wait_preferences.sql',import.meta.url),'utf8'));
   sql(readFileSync(new URL('../../supabase/migrations/202610200001_tincall_schedule_controls.sql',import.meta.url),'utf8'));
+  sql(readFileSync(new URL('../../supabase/migrations/202611100001_tincall_record_summaries.sql',import.meta.url),'utf8'));
   }
   upstream=createServer(async(req,res)=>{
     let body='';for await(const chunk of req)body+=chunk;
@@ -1059,6 +1062,46 @@ test('backup images follow messages, accept stored references on revision update
   assert.equal((await api(`/records/${id}`,upload)).body.error.code,'record_deleted');
   assert.equal((await api(`/records/${id}/media/${image.id}`)).status,410);
   assert.equal((await api(`/records/${id}`)).body.record.deleted,true);
+});
+
+test('backup list carries names and media totals, usage sums backups, and media removal keeps the text',async()=>{
+  const id=crypto.randomUUID(),image=picture(),messageID=crypto.randomUUID(),audio=crypto.randomUUID();
+  const imageBytes=Buffer.from(pngData,'base64').length;
+  await store.media(owner,id,audio,new Request('http://localhost/media',{method:'PUT',headers:{'Content-Type':'audio/wav'},body:new Uint8Array([1,2,3,4])}));
+  const record={version:1,media:[{object_id:audio,bytes:4,asset:{id:crypto.randomUUID(),messageID}}],
+    call:{id,roleName:'Synthetic',startedAt:800000000,messages:[{id:messageID,text:'kept',images:[image]}]}};
+  const before=(await api('/records/usage')).body;
+  assert.equal((await api(`/records/${id}`,mutation({expected_revision:0,record}))).status,200);
+  let entry,query='';
+  for(let page=0;page<50 && !entry;page++){
+    const body=(await api(`/records${query}`)).body;entry=body.records.find(item=>item.id===id);
+    if(!body.next_cursor)break;query=`?after=${encodeURIComponent(body.next_cursor.after)}&after_id=${body.next_cursor.after_id}`;
+  }
+  assert.deepEqual(entry.summary,{role_name:'Synthetic',started_at:800000000,audio_count:1,audio_bytes:4,image_count:1,image_bytes:imageBytes});
+  assert.equal(entry.record,undefined,'the list still never returns record bodies');
+  const usage=(await api('/records/usage')).body;
+  assert.equal(usage.audio_bytes,before.audio_bytes+4);assert.equal(usage.image_bytes,before.image_bytes+imageBytes);
+  const audioOnly=mutation({expected_revision:1,audio:true,images:false});
+  const removed=await api(`/records/${id}/remove-media`,audioOnly);
+  assert.equal(removed.status,200,JSON.stringify(removed.body));
+  assert.deepEqual(removed.body.record.record.media,[]);
+  assert.equal(removed.body.record.record.call.messages[0].text,'kept');
+  assert.equal(removed.body.record.record.call.messages[0].images.length,1);
+  assert.deepEqual((await api(`/records/${id}/remove-media`,audioOnly)).body,removed.body,'a retry replays the same write');
+  await assert.rejects(store.media(owner,id,audio,new Request('http://localhost/media')),{code:'media_not_found'});
+  assert.equal((await connector.handle(new Request(`http://localhost/records/${id}/media/${image.id}`,{headers:{Authorization:'Bearer test-owner'}}))).status,200);
+  assert.equal((await api(`/records/${id}/remove-media`,mutation({expected_revision:1,audio:false,images:true}))).body.error.code,'revision_conflict');
+  assert.equal((await api(`/records/${id}/remove-media`,mutation({expected_revision:2,audio:false,images:false}))).status,400);
+  const imagesOnly=await api(`/records/${id}/remove-media`,mutation({expected_revision:2,audio:false,images:true}));
+  assert.equal(imagesOnly.status,200,JSON.stringify(imagesOnly.body));
+  assert.equal(imagesOnly.body.record.record.call.messages[0].images,undefined);
+  assert.equal(imagesOnly.body.record.record.call.messages[0].text,'kept');
+  await assert.rejects(store.media(owner,id,image.id,new Request('http://localhost/media')),{code:'media_not_found'});
+  const stripped=(await api('/records/usage')).body;
+  assert.equal(stripped.audio_bytes,before.audio_bytes);assert.equal(stripped.image_bytes,before.image_bytes);
+  assert.equal(stripped.records,before.records+1,'the text backup itself remains');
+  assert.equal((await api(`/records/${id}/delete`,mutation({expected_revision:3}))).status,200);
+  assert.deepEqual((await api('/records/usage')).body,before);
 });
 
 test('image envelopes exceed the legacy JSON limit safely, accept four images and preserve text-only limits',async()=>{

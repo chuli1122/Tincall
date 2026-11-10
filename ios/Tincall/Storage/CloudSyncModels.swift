@@ -86,6 +86,27 @@ struct CloudSyncRemote: Codable, Equatable, Identifiable, Sendable {
     let deleted: Bool
     let updated_at: String
     var record: CloudSyncDocument?
+    /// List-only facts from servers that provide them; the body still needs record.get.
+    var summary: CloudSyncRemoteSummary? = nil
+}
+
+struct CloudSyncRemoteSummary: Codable, Equatable, Sendable {
+    let role_name: String?
+    /// Same encoding as CallRecord.startedAt in the stored document.
+    let started_at: Date?
+    let audio_count: Int
+    let audio_bytes: Int64
+    let image_count: Int
+    let image_bytes: Int64
+}
+
+/// Bytes referenced by this owner's cloud backups, not the project's whole storage.
+struct CloudSyncUsage: Codable, Equatable, Sendable {
+    let records: Int
+    let audio_count: Int
+    let audio_bytes: Int64
+    let image_count: Int
+    let image_bytes: Int64
 }
 
 struct CloudSyncCursor: Codable, Equatable, Sendable {
@@ -99,6 +120,16 @@ struct CloudSyncCheckpoint: Codable, Sendable {
     var deleted: Bool = false
     /// Local record/media removal never silently restores or overwrites a different cloud copy.
     var localRemoved: Bool = false
+    /// Whether that cloud revision carried recordings. Losing them later means another phone removed them.
+    var hadAudio: Bool?
+}
+
+/// A cloud media removal not yet confirmed; retried with the same request so the service finishes cleanup.
+struct CloudMediaRemoval: Codable, Sendable {
+    let requestID: UUID
+    let revision: Int
+    let audio: Bool
+    let images: Bool
 }
 
 struct CloudSyncPending: Codable, Sendable {
@@ -123,6 +154,11 @@ struct CloudSyncLedger: Codable, Sendable {
     var pending: CloudSyncPending?
     /// Keep intentionally cleared recordings off this device until an explicit media restore.
     var locallyClearedAudio: Set<UUID>?
+    /// Recordings / images removed from the cloud copy only. Sync keeps them off the cloud
+    /// until an explicit re-upload; the local record keeps them.
+    var cloudClearedAudio: Set<UUID>?
+    var cloudClearedImages: Set<UUID>?
+    var mediaRemovals: [UUID: CloudMediaRemoval]?
 }
 
 /// Compares actual saved content, never a hash or fingerprint.

@@ -28,6 +28,7 @@ struct CloudSyncFailure: LocalizedError {
     static var uploadCount = 0
     static var downloadCount = 0
     static var failAfterCommit = false
+    static var removalRequests: [UUID] = []
     static var delayGet = false
     static var enteredGet = false
     static var onUpload: (() throws -> Void)?
@@ -36,7 +37,7 @@ struct CloudSyncFailure: LocalizedError {
     static let imageBytes = Data([0xff, 0xd8, 0xff, 0x20])
     static func reset() {
         rows = [:]; replies = [:]; requests = []; mutations = []; backupOnlyDeletion = true; ownerReads = 0; recordReads = []
-        uploadCount = 0; downloadCount = 0; failAfterCommit = false
+        uploadCount = 0; downloadCount = 0; failAfterCommit = false; removalRequests = []
         delayGet = false; enteredGet = false; onUpload = nil; onDownload = nil; onImageDownload = nil
     }
 }
@@ -80,6 +81,24 @@ struct CloudSyncFailure: LocalizedError {
     func downloadImage(connection: ConnectionProfile, recordID: UUID, image: CloudSyncImageReference, destination: URL) async throws { try Fixture.onImageDownload?(); try Fixture.imageBytes.write(to: destination) }
     func callImageIDs(connection: ConnectionProfile, callID: UUID) async throws -> [UUID] { [] }
     func removeMedia(connection: ConnectionProfile, recordID: UUID, objectID: UUID) async throws { }
+    var supportsMediaRemoval: Bool { true }
+    func usage(connection: ConnectionProfile) async throws -> CloudSyncUsage {
+        CloudSyncUsage(records: Fixture.rows.count, audio_count: 0, audio_bytes: 0, image_count: 0, image_bytes: 0)
+    }
+    func removeMedia(connection: ConnectionProfile, id: UUID, requestID: UUID, expectedRevision: Int, audio: Bool, images: Bool) async throws -> CloudSyncRemote {
+        Fixture.removalRequests.append(requestID)
+        if let previous = Fixture.replies[requestID] { return previous }
+        guard let row = Fixture.rows[id], row.revision == expectedRevision, var document = row.record else { throw CloudSyncFailure(status: 409, code: "revision_conflict") }
+        if audio { document.media = [] }
+        if images {
+            for index in document.call.messages.indices { document.call.messages[index].images = nil }
+            document.imageReferences = []
+        }
+        let result = CloudSyncRemote(id: id, revision: row.revision + 1, deleted: false, updated_at: "2026-11-10", record: document)
+        Fixture.rows[id] = result; Fixture.replies[requestID] = result
+        if Fixture.failAfterCommit { Fixture.failAfterCommit = false; throw URLError(.networkConnectionLost) }
+        return result
+    }
 }
 
 @main struct AutomaticCloudSyncStoreChecks {
@@ -336,6 +355,38 @@ struct CloudSyncFailure: LocalizedError {
         let downloadedImage = imageRecords.records.first { $0.id == local.id }?.messages[0].images?.first
         check(imageSync.errorMessage == nil && downloadedImage != nil && (try? imageRecords.imageURL(downloadedImage!, recordID: local.id, messageID: local.messages[0].id)) != nil, "cloud message images download before their record is installed")
 
+        // Removing images from the cloud copy keeps them locally and later syncs never upload them again.
+        await sync.removeCloudMedia(connection: connection, ids: [local.id], audio: false, images: true)
+        check(sync.errorMessage == nil && Fixture.rows[local.id]?.record?.call.messages[0].images == nil, "cloud images are removed from the backup")
+        check(records.records.first { $0.id == local.id }?.messages[0].images?.count == 1, "local images stay after a cloud-only removal")
+        let mutationsAfterRemoval = Fixture.mutations.count
+        await sync.synchronizeAutomatically(connection: connection)
+        check(sync.errorMessage == nil && Fixture.mutations.count == mutationsAfterRemoval &&
+              Fixture.rows[local.id]?.record?.call.messages[0].images == nil, "sync does not upload cloud-removed images again")
+        check(records.records.first { $0.id == local.id }?.messages[0].images?.count == 1, "sync does not drop local images of a cloud-cleared call")
+        await imageSync.synchronizeAutomatically(connection: connection)
+        check(imageSync.errorMessage == nil && imageRecords.records.first { $0.id == local.id }?.messages[0].images?.count == 1 &&
+              imageSync.cloudClearedImages.contains(local.id), "another phone keeps its local images when the cloud copy loses them")
+        await sync.reuploadLocalMedia(connection: connection, id: local.id)
+        check(sync.errorMessage == nil && Fixture.rows[local.id]?.record?.imageReferences?.count == 1 &&
+              !sync.cloudClearedImages.contains(local.id), "re-upload restores the cloud images and clears the choice")
+        // A removal applied over another phone's newer text must not let this phone overwrite that text.
+        var edited = Fixture.rows[local.id]!.record!
+        edited.call.summary = "Edited elsewhere"
+        Fixture.rows[local.id] = CloudSyncRemote(id: local.id, revision: Fixture.rows[local.id]!.revision + 1, deleted: false, updated_at: "2026-11-10", record: edited)
+        await sync.removeCloudMedia(connection: connection, ids: [local.id], audio: false, images: true)
+        await sync.synchronizeAutomatically(connection: connection)
+        check(Fixture.rows[local.id]?.record?.call.summary == "Edited elsewhere", "media removal over newer cloud text does not let sync overwrite it")
+        // A removal that fails after the cloud committed it is retried with the same request, so the service finishes cleanup.
+        Fixture.failAfterCommit = true
+        Fixture.removalRequests = []
+        await sync.removeCloudMedia(connection: connection, ids: [local.id], audio: true, images: false)
+        check(sync.errorMessage != nil && Fixture.removalRequests.count == 1, "an interrupted cloud media removal reports the failure")
+        await sync.synchronizeAutomatically(connection: connection)
+        check(Fixture.removalRequests.count == 2 && Fixture.removalRequests[0] == Fixture.removalRequests[1], "the next sync retries the removal with the same request")
+        await sync.synchronizeAutomatically(connection: connection)
+        check(Fixture.removalRequests.count == 2, "a finished removal is not sent again")
+
         Fixture.reset()
         let (stoppedImages, stoppedImageSync, _) = try make("image-stop")
         Fixture.rows[local.id] = CloudSyncRemote(id: local.id, revision: 1, deleted: false, updated_at: "2026-10-19", record: imageDocument)
@@ -363,6 +414,13 @@ struct CloudSyncFailure: LocalizedError {
         check(audioRecords.records.first { $0.id == audioRemote.id }?.audioAssets.first?.id == remoteAsset.id, "downloaded audio saves using original stable identity")
         await audioSync.synchronizeAutomatically(connection: connection)
         check(audioSync.errorMessage == nil && Fixture.uploadCount == 1 && Fixture.downloadCount == 1, "unchanged audio metadata avoids duplicate transfers after local path changes")
+        // Another phone removed this call's cloud recordings: this phone must not upload them again.
+        var stripped = Fixture.rows[audioLocal.id]!.record!
+        stripped.media = []
+        Fixture.rows[audioLocal.id] = CloudSyncRemote(id: audioLocal.id, revision: Fixture.rows[audioLocal.id]!.revision + 1, deleted: false, updated_at: "2026-11-10", record: stripped)
+        await audioSync.synchronizeAutomatically(connection: connection)
+        check(audioSync.errorMessage == nil && Fixture.uploadCount == 1 && Fixture.rows[audioLocal.id]?.record?.media.isEmpty == true &&
+              audioSync.cloudClearedAudio.contains(audioLocal.id), "recordings removed by another phone are not uploaded again")
         try audioSync.setMediaEnabled(false)
         let newAudio = CallAudioAsset(messageID: audioRemote.messages[0].id, segmentIndex: 1, relativePath: "another.wav", duration: 1)
         var audioDoc = Fixture.rows[audioRemote.id]!.record!

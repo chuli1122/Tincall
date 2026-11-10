@@ -66,6 +66,24 @@ test('trial expiry stops Worker delivery until a purchased device rebind', async
   assert.equal((await post('/devices', { ...device, calls_valid_until: 'invalid' })).status, 400);
 });
 
+test('a reinstall registration replaces the old device with the same APNs token', async t => {
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  const bindings = registryBindings();
+  t.after(() => bindings.close());
+  async function post(path, value) {
+    const response = await worker.fetch(new Request(`https://synthetic.invalid${path}`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(value)
+    }), { ...env, PUSH_REGISTRIES: bindings });
+    return { status: response.status, body: await response.json() };
+  }
+  const owner = crypto.randomUUID(), deviceToken = 'b'.repeat(64);
+  const old = await post('/devices', { owner_id: owner, device_id: crypto.randomUUID(), device_token: deviceToken, environment: 'production' });
+  const current = await post('/devices', { owner_id: owner, device_id: crypto.randomUUID(), device_token: deviceToken, environment: 'production' });
+  const call = { owner_id: owner, call_id: crypto.randomUUID(), contact_id: 'synthetic', source: 'independent', event: 'incoming_call' };
+  assert.equal((await post('/push', { ...call, binding_id: old.body.binding_id })).body.error.code, 'device_not_registered');
+  assert.equal((await post('/push', { ...call, binding_id: current.body.binding_id })).status, 200);
+});
+
 test('APNs transport selects the exact environment and signs a real ES256 provider token', async () => {
   for (const environment of ['sandbox', 'production']) {
     const deviceID = crypto.randomUUID();

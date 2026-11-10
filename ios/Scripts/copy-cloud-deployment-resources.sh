@@ -24,6 +24,7 @@ for task_file in \
   supabase/migrations/202610220002_tincall_mcp_safety.sql \
   supabase/migrations/202610250001_tincall_mcp_wait_preferences.sql \
   supabase/migrations/202610270001_tincall_hot_path_indexes.sql \
+  supabase/migrations/202611100001_tincall_record_summaries.sql \
   supabase/functions/tincall/index.ts \
   supabase/functions/_shared/tincall/service.mjs \
   supabase/functions/_shared/tincall/server-version.json \

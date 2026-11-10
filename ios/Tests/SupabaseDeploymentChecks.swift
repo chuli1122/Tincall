@@ -100,7 +100,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
                         let params = payload["parameters"] as? [String] ?? []
                         precondition(!sql.contains(testPAT) && !sql.contains(testKey))
                         if sql.hasPrefix("begin;") {
-                            let version = ["202610110001", "202610110002", "202610140001", "202610160001", "202610180001", "202610190001", "202610190002", "202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001", "202610270001"].first { sql.contains("values ('\($0)'") }!
+                            let version = ["202610110001", "202610110002", "202610140001", "202610160001", "202610180001", "202610190001", "202610190002", "202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001", "202610270001", "202611100001"].first { sql.contains("values ('\($0)'") }!
                             operation = "migration.\(version)"
                             f.migrationSQL[version] = sql
                             precondition(sql.hasSuffix("commit;") && sql.contains("pg_advisory_xact_lock") && sql.contains("insert into supabase_migrations.schema_migrations"))
@@ -206,7 +206,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         } catch { client?.urlProtocol(self, didFailWithError: error) }
     }
     static func migrationName(_ version: String) -> String {
-        ["202610110001": "tincall_connector", "202610110002": "tincall_cron", "202610140001": "tincall_mcp_roles", "202610160001": "tincall_voice_instructions", "202610180001": "tincall_recent_calls", "202610190001": "tincall_mcp_sse", "202610190002": "tincall_mcp_tools", "202610200001": "tincall_schedule_controls", "202610200002": "tincall_incoming_events", "202610200003": "tincall_mcp_oauth", "202610200004": "tincall_call_presence", "202610200005": "tincall_contact_mode", "202610200006": "tincall_wake_bridge", "202610210001": "tincall_mcp_voice_ack", "202610210002": "tincall_mcp_conversation", "202610210003": "tincall_message_images", "202610220001": "tincall_service_safety", "202610220002": "tincall_mcp_safety", "202610250001": "tincall_mcp_wait_preferences", "202610270001": "tincall_hot_path_indexes"][version] ?? "tincall_future"
+        ["202610110001": "tincall_connector", "202610110002": "tincall_cron", "202610140001": "tincall_mcp_roles", "202610160001": "tincall_voice_instructions", "202610180001": "tincall_recent_calls", "202610190001": "tincall_mcp_sse", "202610190002": "tincall_mcp_tools", "202610200001": "tincall_schedule_controls", "202610200002": "tincall_incoming_events", "202610200003": "tincall_mcp_oauth", "202610200004": "tincall_call_presence", "202610200005": "tincall_contact_mode", "202610200006": "tincall_wake_bridge", "202610210001": "tincall_mcp_voice_ack", "202610210002": "tincall_mcp_conversation", "202610210003": "tincall_message_images", "202610220001": "tincall_service_safety", "202610220002": "tincall_mcp_safety", "202610250001": "tincall_mcp_wait_preferences", "202610270001": "tincall_hot_path_indexes", "202611100001": "tincall_record_summaries"][version] ?? "tincall_future"
     }
     static func vaultID(_ name: String) -> String {
         name == "tincall_worker_token" ? "ec02eca0-bee6-48df-a467-2c282198d192" : "0c676f4b-23b7-4d76-a442-6c362567bd7b"
@@ -230,6 +230,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         if images { functions += ["tincall_image_command"] }
         if f.versions.contains("202610220001") { functions += ["tincall_remove_push_device"] }
         if f.versions.contains("202610220002") { functions += ["tincall_resolve_call_context"] }
+        if f.versions.contains("202611100001") { functions += ["tincall_record_summaries"] }
         return ["tables": (first ? ["tincall_owners", "tincall_calls", "tincall_messages", "tincall_events", "tincall_requests", "tincall_jobs", "tincall_devices", "tincall_schedules", "tincall_push_jobs", "tincall_records"] : []) + (roles ? ["tincall_mcp_roles"] : []) + (sse ? ["tincall_mcp_sse"] : []) + (f.versions.contains("202610200003") ? ["tincall_oauth_clients", "tincall_oauth_requests", "tincall_oauth_grants"] : []) + (f.versions.contains("202610200006") ? ["tincall_wake_bridges"] : []),
                 "functions": functions,
                 "policies": first && !f.versions.contains("202610220001") ? ["tincall_media_read", "tincall_media_insert", "tincall_media_update", "tincall_media_delete"] : [],
@@ -386,10 +387,10 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         let recoveryText = String(decoding: checkpoint, as: UTF8.self)
         precondition(!recoveryText.contains(testPAT) && !recoveryText.contains(testKey))
         fixture.lock.withLock {
-            precondition(fixture.migrationWrites == 20 && fixture.ownerCreates == 1 && fixture.verifyFunctionBody)
+            precondition(fixture.migrationWrites == 21 && fixture.ownerCreates == 1 && fixture.verifyFunctionBody)
         }
         _ = try await run(service()) // New service instance, persisted recovery, completed deployment.
-        fixture.lock.withLock { precondition(fixture.migrationWrites == 20 && fixture.ownerCreates == 1 && fixture.functionWrites == 2) }
+        fixture.lock.withLock { precondition(fixture.migrationWrites == 21 && fixture.ownerCreates == 1 && fixture.functionWrites == 2) }
         print("PASS: success, multipart production resources, owner binding, capabilities/save, Keychain recovery, completed rerun")
         fixture.lock.withLock { fixture.exposed = true }
         try await failed(service(), at: .inspection)
@@ -398,7 +399,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
 
         // Adopt the former manually installed image SQL without rotating credentials.
         fixture.lock.withLock {
-            fixture.versions.removeAll { ["202610210003", "202610220001", "202610220002", "202610250001", "202610270001"].contains($0) }
+            fixture.versions.removeAll { ["202610210003", "202610220001", "202610220002", "202610250001", "202610270001", "202611100001"].contains($0) }
             fixture.manualImages = true
             fixture.migrationWrites = 0
         }
@@ -406,7 +407,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         let legacyPhone = try credentials.read(connectionID: legacyImages.id)
         precondition(legacyImages.id == profile.id && legacyPhone == phone)
         fixture.lock.withLock {
-            precondition(fixture.migrationWrites == 5 && fixture.ownerCreates == 1)
+            precondition(fixture.migrationWrites == 6 && fixture.ownerCreates == 1)
             fixture.manualImages = false
         }
         print("PASS: manually installed image schema upgrades into migration history without rotating credentials")
@@ -417,7 +418,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         oldRecovery["completed"] = (recovery["completed"] as! [String]).filter { !["迁移：定时来电设置", "迁移：前台来电订阅", "迁移：MCP OAuth 授权", "迁移：通话占用回收", "迁移：联系人模式同步", "迁移：MCP 唤醒桥", "迁移：MCP 朗读规则确认", "迁移：MCP 简洁对话", "迁移：图片消息", "迁移：授权注册与推送清理", "迁移：MCP 通话与授权保护", "迁移：MCP 等待偏好", "迁移：通话查询索引"].contains($0) }
         try credentials.writeCloudDeployment(JSONSerialization.data(withJSONObject: oldRecovery), projectRef: testRef)
         fixture.lock.withLock {
-            fixture.versions.removeAll { ["202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001", "202610270001"].contains($0) }
+            fixture.versions.removeAll { ["202610200001", "202610200002", "202610200003", "202610200004", "202610200005", "202610200006", "202610210001", "202610210002", "202610210003", "202610220001", "202610220002", "202610250001", "202610270001", "202611100001"].contains($0) }
             fixture.migrationWrites = 0; fixture.functionWrites = 0; fixture.calls = []
             fixture.failure = "migration.202610200001"
         }
@@ -430,7 +431,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         }
         try await failed(service(), at: .function)
         fixture.lock.withLock {
-            precondition(fixture.migrationWrites == 13 && fixture.functionWrites == 0)
+            precondition(fixture.migrationWrites == 14 && fixture.functionWrites == 0)
             fixture.failure = nil
         }
         let upgrade = service()
@@ -441,7 +442,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
             precondition(upgrade.progress.first { $0.step == step }?.skipped == true)
         }
         fixture.lock.withLock {
-            precondition(fixture.migrationWrites == 13 && fixture.functionWrites == 1)
+            precondition(fixture.migrationWrites == 14 && fixture.functionWrites == 1)
             precondition(!fixture.calls.contains { ["secrets.write", "secrets.bind", "vault.write", "keys", "owner.create"].contains($0) })
         }
         print("PASS: completed old installation upgrades only missing migration, uploads current function, preserves credentials, and retries safely")
@@ -460,7 +461,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         precondition(retry.progress.first { $0.step == .connector }?.skipped == true)
         let resumedPhone = try credentials.read(connectionID: resumed.id)
         precondition(resumedPhone == before["phoneToken"] as? String)
-        fixture.lock.withLock { precondition(fixture.migrationWrites == 20 && fixture.worker == before["workerToken"] as? String) }
+        fixture.lock.withLock { precondition(fixture.migrationWrites == 21 && fixture.worker == before["workerToken"] as? String) }
         print("PASS: extension failure stops; a new service resumes without reapplying migration or rotating tokens")
 
         reset()
@@ -475,14 +476,14 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
         let imageRetry = service()
         _ = try await run(imageRetry)
         precondition(imageRetry.progress.first { $0.step == .messageImages }?.skipped == true)
-        fixture.lock.withLock { precondition(fixture.migrationWrites == 20 && fixture.functionWrites == 1) }
+        fixture.lock.withLock { precondition(fixture.migrationWrites == 21 && fixture.functionWrites == 1) }
         print("PASS: image migration failure stops deployment; a lost committed response resumes without reapplying SQL")
 
         reset()
         fixture.lock.withLock { fixture.loseMigrationResponse = true }
         try await failed(service(), at: .connector)
         _ = try await run(service())
-        fixture.lock.withLock { precondition(fixture.migrationWrites == 20) }
+        fixture.lock.withLock { precondition(fixture.migrationWrites == 21) }
         print("PASS: committed migration with lost response is discovered before retry")
 
         // Each later remote failure must prevent the connection callback; retry safely overwrites
@@ -500,11 +501,11 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
             }
             _ = try await run(service())
             fixture.lock.withLock {
-                precondition(fixture.migrationWrites == 20 && fixture.ownerCreates == 1 && fixture.vault.count == 2)
+                precondition(fixture.migrationWrites == 21 && fixture.ownerCreates == 1 && fixture.vault.count == 2)
                 if operation == "capabilities" {
                     precondition(fixture.functionWrites == 2, "Retry must upload the current function source after a failed connection check")
                     // One history inspection per attempt, plus confirmation after each actual migration.
-                    precondition(fixture.calls.filter { $0.hasSuffix("/database/migrations") }.count == 22)
+                    precondition(fixture.calls.filter { $0.hasSuffix("/database/migrations") }.count == 23)
                 }
             }
         }

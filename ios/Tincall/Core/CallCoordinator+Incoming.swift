@@ -6,7 +6,8 @@ import Foundation
 extension CallCoordinator {
     func prepareIncomingOpening(callID: UUID, role: CallRole, connections: [ConnectionProfile],
                                 retention: AudioRetention = AudioRetention(), historyRecords: [CallRecord] = []) throws {
-        guard role.effectiveCallMode == .standalone else { return }
+        // Only "contact speaks first" prepares the opening while ringing; a wait starts after answering.
+        guard role.effectiveCallMode == .standalone, role.openingDelay(incoming: true) == .zero else { return }
         guard incomingOpening?.turn.session.callID != callID else { return }
         guard !isCallActive else { throw CancellationError() }
         try CallAccessStore.shared.requireCurrentAccess()
@@ -98,6 +99,7 @@ extension CallCoordinator {
         }
         if value.externalAnswerRequestID == nil { value.externalAnswerRequestID = UUID() }
         value.endedAbnormally = nil
+        value.incoming = true
         try save(value)
         record = value
         records[callID] = value
@@ -143,7 +145,8 @@ extension CallCoordinator {
             let state = try await external.answer(connection: connector, callID: callID,
                 requestID: requestID, epoch: value.externalEpoch ?? 0,
                 expressionPrompt: prepared.configuration.tts.effectiveExpressionPrompt, userName: summaryUserName(),
-                timeAwarenessEnabled: role.timeAwarenessEnabled == true)
+                timeAwarenessEnabled: role.timeAwarenessEnabled == true,
+                deferOpening: defersCloudOpening(role, incoming: true))
             guard session == identity, phase == .connecting else { throw CancellationError() }
             let expectedSource = role.effectiveCallMode == .standalone ? "independent" : role.effectiveCallMode.rawValue
             guard state.id == callID, state.contact_id == value.externalRoleID, state.source == expectedSource else {
@@ -192,6 +195,7 @@ extension CallCoordinator {
             isMuted = false
             externalConnectionLost = false
             if let connector = externalConnections[callID] { startExternalEvents(session: prepared.session, connection: connector) }
+            if let role { scheduleOpening(role: role, incoming: true, session: prepared.session) }
         } catch {
             if session == prepared.session { hangUp(abnormally: true) }
             throw error
@@ -207,10 +211,11 @@ extension CallCoordinator {
         if session?.callID == callID { hangUp(); return }
         if records[callID] == nil {
             let name = role.map { String(localized: "\($0.displayName)（未接来电）") } ?? String(localized: "未接来电")
-            let value = CallRecord(id: callID, roleID: role?.id ?? callID, roleName: name, endedAt: Date(),
+            var value = CallRecord(id: callID, roleID: role?.id ?? callID, roleName: name, endedAt: Date(),
                 callMode: role?.effectiveCallMode, externalConnectionID: connector.id,
                 externalRoleID: role.flatMap { $0.effectiveCallMode == .standalone ? $0.id.uuidString : $0.externalRoleID },
                 externalCallID: callID, externalEventCursor: 0, externalEpoch: 0)
+            value.incoming = true
             records[callID] = value
             do { try save(value) }
             catch { reportSavingFailure(error, callID: callID) }

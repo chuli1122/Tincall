@@ -85,7 +85,6 @@ struct RequestLogScreen: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                filters
                 if let issue = store.storageIssue {
                     Text(issue).font(.caption).foregroundStyle(.red)
                 }
@@ -115,6 +114,10 @@ struct RequestLogScreen: View {
                 .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: failuresOnly)
             }
             .padding(.horizontal, 24)
+        }
+        // Filters stay under the page header instead of scrolling away with the cards.
+        .safeAreaBar(edge: .top, spacing: 0) {
+            filters.padding(.horizontal, 24)
         }
         .modifier(SettingsPageStyle(title: String(localized: "请求日志"), subtitle: String(localized: "仅存本机 · 最近 7 天"),
                                     symbol: "list.bullet.rectangle", index: "REQUEST LOGS",

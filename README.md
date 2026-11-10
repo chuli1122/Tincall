@@ -67,17 +67,19 @@ Tincall 是最低支持 iOS 26 的原生 AI 语音通话 App。支持手机直�
 
 ### 自己的电脑／服务器
 
-安装 Node.js LTS（建议 Node 24，最低 Node 22.5 且内置 SQLite 可用），在源码根目录运行：
+安装 Node.js LTS（建议 Node 24，最低 Node 22.5 且内置 SQLite 可用），复制运行下面一条命令即可下载最新公开源码并安装。更新时重新运行同一条命令，已有数据和令牌保留。
 
 ```sh
-# macOS / Linux
-sh connector/install-local.sh
+# macOS / Linux：源码放在 ~/Tincall
+mkdir -p ~/Tincall && curl -fsSL https://github.com/chuli1122/Tincall/archive/refs/heads/main.tar.gz | tar -xz -C ~/Tincall --strip-components=1 && sh ~/Tincall/connector/install-local.sh
 ```
 
 ```powershell
-# Windows，无需 WSL
-powershell -NoProfile -ExecutionPolicy Bypass -File connector\install-local.ps1
+# Windows，无需 WSL：源码放在 %USERPROFILE%\Tincall-main
+iwr https://github.com/chuli1122/Tincall/archive/refs/heads/main.zip -OutFile $env:TEMP\tincall.zip; Expand-Archive $env:TEMP\tincall.zip $env:USERPROFILE -Force; powershell -NoProfile -ExecutionPolicy Bypass -File $env:USERPROFILE\Tincall-main\connector\install-local.ps1
 ```
+
+已下载源码时，也可在源码根目录运行 `sh connector/install-local.sh` 或 `connector\install-local.ps1`。
 
 也支持 Docker。默认只监听本机回环地址；手机需要可达的 HTTPS 地址，可用反向代理或按 [连接端安装说明](connector/README.md#部署到自己的电脑或服务器) 配置隧道。将 HTTPS 基础地址与手机令牌填入 App“连接已有服务”。电脑须持续运行；临时隧道重启后可能换地址。
 

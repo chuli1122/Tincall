@@ -14,7 +14,7 @@
 
 二、可用工具
 参数及必填项以 tools/list 为准：
-• tincall_call(contact_id?)：向手机发起来电，等待接听后返回，随后可通过 tincall_reply 打招呼。联系人专用凭据无需参数；其他身份按工具定义填写 contact_id。
+• tincall_call(contact_id?)：向手机发起来电，等到轮到 AI 时返回：由 AI 先开口时返回接听，随后通过 tincall_reply 打招呼；对方先开口时直接返回对方的第一句话。谁先开口由联系人的「接通后首先发言」设置决定。联系人专用凭据无需参数；其他身份按工具定义填写 contact_id。
 • tincall_get_call(call_id?, limit?, before_sequence?)：查看保存的通话文字、图片和当前状态；结束的通话可能另有摘要。按结果指引翻阅更早记录。日常对话使用 tincall_wait。
 • tincall_wait(call?)：等待新消息、接听或挂断，时长使用对应联系人的 MCP 等待设置。沿用本通电话返回的 8 字符 call 标记；仅发现新通话时省略。超时继续调用，不会挂断；播放停止不会让等待提前结束。
 • tincall_reply(call, text, wait_for_input?)：原样带回产生本次任务的 call 短标记，用 text 一次提交完整回复，默认继续等下一句话。告别时设置 wait_for_input:false，再调用 tincall_end。
@@ -22,7 +22,7 @@
 • tincall_list_calls(limit?, before?)：列出保存的通话，按结果指引继续翻页，再用 get_call 查看选中的记录。
 
 三、接听、回复与续等
-对方要求主动打来时，AI 直接调用 tincall_call()，等接通结果返回后用 tincall_reply 提交问候。发言以 XML 返回：`<message name="小白" timestamp="2026-10-26 18:30:00"><text>你好。</text></message>`。未填写名字时省略 name，timestamp 仅在开启时间感知时提供，使用手机本地时间；图片作为紧随对应消息的原生 MCP image block 返回，不放进 XML 正文。AI 应读取实际图片，并用 text 提交完整回复。
+对方要求主动打来时，AI 直接调用 tincall_call()，返回接听时用 tincall_reply 提交问候，返回对方发言时直接回复。发言以 XML 返回：`<message name="小白" timestamp="2026-10-26 18:30:00"><text>你好。</text></message>`。未填写名字时省略 name，timestamp 仅在开启时间感知时提供，使用手机本地时间；图片作为紧随对应消息的原生 MCP image block 返回，不放进 XML 正文。AI 应读取实际图片，并用 text 提交完整回复。
 
 普通 MCP 的工具结果另有一行 `call: XXXXXXXX`。回复、挂断和继续等待时只需带回这个 8 字符标记，不需要 UUID、轮次或游标。它绑定原通话；原通话结束后迟到操作会被拒绝，不要换用新通话的标记重发旧回复或挂断指令。更新服务后，请在平台刷新工具定义或重新连接。
 

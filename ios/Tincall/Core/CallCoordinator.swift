@@ -89,6 +89,7 @@ final class CallCoordinator {
         var attached = false
     }
     @ObservationIgnored var incomingOpening: IncomingOpening?
+    @ObservationIgnored var openingTask: Task<Void, Never>?
     @ObservationIgnored var textOnly = false
     @ObservationIgnored var muteTransitionID: UUID?
     @ObservationIgnored var speakerTransitionID: UUID?
@@ -154,9 +155,10 @@ final class CallCoordinator {
                 (connection, stt, tts) = try validatedConnections(role: role, connections: connections)
             }
             self.textOnly = textOnly
-            let newRecord = CallRecord(roleID: role.id, roleName: role.displayName, callMode: role.effectiveCallMode,
+            var newRecord = CallRecord(roleID: role.id, roleName: role.displayName, callMode: role.effectiveCallMode,
                                        externalConnectionID: role.externalConnectionID,
                                        externalRoleID: role.effectiveCallMode == .standalone ? nil : role.externalRoleID)
+            newRecord.incoming = false
             try save(newRecord)
             self.role = role
             self.connection = connection
@@ -193,7 +195,8 @@ final class CallCoordinator {
                     mutate(newRecord.id) { $0.externalCallID = newRecord.id; $0.externalEpoch = 0; $0.externalEventCursor = 0 }
                     try save(records[newRecord.id] ?? newRecord)
                     let state = try await external.create(connection: connection, role: role, callID: newRecord.id,
-                                                          expressionPrompt: tts?.effectiveExpressionPrompt ?? "", userName: summaryUserName())
+                                                          expressionPrompt: tts?.effectiveExpressionPrompt ?? "", userName: summaryUserName(),
+                                                          deferOpening: defersCloudOpening(role, incoming: false))
                     mutate(newRecord.id) { $0.externalEpoch = state.epoch }
                     guard session == newSession, phase == .connecting else {
                         enqueueExternalControl(callID: newRecord.id, endsCall: true)
@@ -215,6 +218,7 @@ final class CallCoordinator {
                 startActivityCheckpoints(newSession)
                 externalConnectionLost = false
                 if role.effectiveCallMode != .standalone { startExternalEvents(session: newSession, connection: connection) }
+                scheduleOpening(role: role, incoming: false, session: newSession)
             } catch {
                 guard session == newSession else { return }
                 stopActivityCheckpoints(newSession)
@@ -234,6 +238,8 @@ final class CallCoordinator {
     func hangUp(abnormally: Bool = false, remotely: Bool = false) {
         guard isCallActive, let session else { return }
         incomingOpening = nil
+        openingTask?.cancel()
+        openingTask = nil
         preparedIncoming = nil
         endedByRemote = remotely
         externalEndSession = nil

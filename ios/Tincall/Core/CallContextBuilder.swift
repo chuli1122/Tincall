@@ -51,7 +51,7 @@ enum CallContextBuilder {
 
     static func build(role: CallRole, historyRecords: [CallRecord], currentMessages: [CallMessage], ttsConnection: ConnectionProfile? = nil, userName: String = "",
                       loadImages: ((CallMessage) throws -> [Data])? = nil, assistantInitiated: Bool = false,
-                      audioInput: (messageID: UUID, audio: Data)? = nil) throws -> CallContext {
+                      calleeOpening: Bool = false, audioInput: (messageID: UUID, audio: Data)? = nil) throws -> CallContext {
         guard role.effectiveCallMode == .standalone else {
             throw TincallError(message: String(localized: "外部模式的上下文由连接端管理，不在手机重复拼接人设和历史"))
         }
@@ -74,9 +74,13 @@ enum CallContextBuilder {
                 throw TincallError(message: String(localized: "原声录音与本轮发言不匹配"))
             }
         }
-        let openingEvent = assistantInitiated && messages.isEmpty ? """
+        let openingEvent = !messages.isEmpty ? "" : assistantInitiated ? """
         <call_event>
         这是 Tincall 发出的通话状态通知，不是对方发言。你正在主动给对方打电话，请结合你的人设与已有上下文，准备一句自然的开场白，在对方接听后先开口。对方尚未说话，不要编造对方的发言，也不要朗读这条通知。
+        </call_event>
+        """ : calleeOpening ? """
+        <call_event>
+        这是 Tincall 发出的通话状态通知，不是对方发言。对方打来电话，你已接听，对方暂时还没有说话。请结合你的人设与已有上下文，自然地先开口。不要编造对方的发言，也不要朗读这条通知。
         </call_event>
         """ : ""
         guard latest != nil || !openingEvent.isEmpty else { throw TincallError(message: String(localized: "请填写本轮输入后预览请求")) }

@@ -137,7 +137,10 @@ struct RecordListScreen: View {
                                        summaryConnections: summaryConnections, onRequestSummaryUsing: onRequestSummaryUsing)
                         .toolbar(.visible, for: .navigationBar)
                 } label: {
-                    HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                      // The mark sits beside the name and time lines; a summary below spans under both.
+                      HStack(alignment: .center, spacing: 12) {
+                        directionMark(record)
                         VStack(alignment: .leading, spacing: 6) {
                             Text(record.roleName)
                                 .font(.body.weight(.medium))
@@ -161,14 +164,16 @@ struct RecordListScreen: View {
                             }
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            if roleID != nil, !record.summary.isEmpty {
-                                Text(record.summary)
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(2)
-                            }
                         }
                         Spacer(minLength: 0)
+                      }
+                      if roleID != nil, !record.summary.isEmpty {
+                          Text(record.summary)
+                              .font(.callout)
+                              .foregroundStyle(.secondary)
+                              .lineLimit(2)
+                              .padding(.leading, 34)
+                      }
                     }
                 }
                 .padding(.vertical, 18)
@@ -189,6 +194,17 @@ struct RecordListScreen: View {
                     .padding(.bottom, isDockPage ? dockClearance : 0)
             }
         }
+    }
+
+    /// Fixed width keeps names aligned for older records that never stored a direction.
+    private func directionMark(_ record: CallRecord) -> some View {
+        Image(systemName: record.incoming == true ? "arrow.down.left" : "arrow.up.right")
+            .font(.system(size: 17, weight: .semibold))
+            .foregroundStyle(record.incoming == true ? Color.accentColor : Color.secondary)
+            .opacity(record.incoming == nil ? 0 : 1)
+            .frame(width: 22)
+            .accessibilityLabel(record.incoming == true ? Text("来电") : Text("去电"))
+            .accessibilityHidden(record.incoming == nil)
     }
 
     @ViewBuilder private func interruptionLabel(_ record: CallRecord) -> some View {
@@ -241,10 +257,7 @@ struct RecordListScreen: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
                     .accessibilityHidden(true)
-                TextField("搜索通话", text: $searchText)
-                    .font(.subheadline)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                SettingsTextField(placeholder: String(localized: "搜索通话"), text: $searchText, returnKey: .search, plain: true)
                     .accessibilityLabel("搜索通话")
                 if !searchText.isEmpty {
                     Button { searchText = "" } label: {

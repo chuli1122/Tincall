@@ -121,10 +121,7 @@ struct ContactsScreen: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
                     .accessibilityHidden(true)
-                TextField("搜索联系人", text: $searchText)
-                    .font(.subheadline)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                SettingsTextField(placeholder: String(localized: "搜索联系人"), text: $searchText, returnKey: .search, plain: true)
                     .accessibilityLabel("搜索联系人")
                 if !searchText.isEmpty {
                     Button {
@@ -180,10 +177,14 @@ struct ContactsScreen: View {
                             .font(.body.weight(.medium))
                             .foregroundStyle(.primary)
                             .lineLimit(2)
-                        if let lastCall = records?.records.first(where: { $0.roleID == role.id }) {
+                        // Only finished calls: a new dial must not change this line under the call page's
+                        // entrance animation, and later updates replace the text without a cross-fade.
+                        if let lastCall = records?.records.first(where: { $0.roleID == role.id && $0.isFinished }) {
                             Text("上次通话：\(lastCall.startedAt, format: .dateTime.month(.twoDigits).day(.twoDigits).hour().minute())")
                                 .font(.caption2.monospacedDigit())
                                 .foregroundStyle(.secondary)
+                                .contentTransition(.identity)
+                                .transaction { $0.animation = nil }
                         } else {
                             Text("还没有通话")
                                 .font(.caption2)

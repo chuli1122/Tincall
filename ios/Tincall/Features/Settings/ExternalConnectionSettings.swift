@@ -84,6 +84,8 @@ struct BackendContactSettings: View {
 
 struct MCPOAuthAuthorizationSettings: View {
     let connection: ConnectionProfile
+    /// Preselected when opened from a contact; the person still confirms it.
+    var preferredContactID: String? = nil
     @State private var code = ""
     @State private var request: MCPOAuthAuthorizationRequest?
     @State private var contactID: String?
@@ -94,45 +96,122 @@ struct MCPOAuthAuthorizationSettings: View {
 
     var body: some View {
         SettingsList {
-            Section {
-                Text("只输入你自己刚在浏览器里看到的授权码。别人发给你的码不要输入，也不要替别人批准授权。")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(.orange)
-                Text("在 ChatGPT 或 Claude 添加 MCP 服务时选择 OAuth，将授权页显示的一次性授权码填在这里。")
-                    .font(.footnote).foregroundStyle(.secondary)
-                TextField("一次性授权码", text: $code)
+            step("01", title: String(localized: "输入授权码"), caption: "CODE") {
+                TextField("XXXX-XXXX", text: Binding(get: { code }, set: { code = Self.formatted($0) }))
+                    .font(.system(.title3, design: .monospaced).weight(.semibold))
+                    .multilineTextAlignment(.center)
                     .textInputAutocapitalization(.characters).autocorrectionDisabled()
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(Color.settingsSurface(lightOpacity: 0.055), in: RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.75))
                     .disabled(isWorking || request != nil || decision != nil)
-                if let decision {
-                    Text(decision.approved ? String(localized: "已授权。回到原授权页面刷新，继续连接。") : String(localized: "已拒绝此次授权。"))
-                    Link("返回授权页", destination: decision.continuation_url)
-                } else if let request {
-                    if let date = request.requestedAt {
-                        LabeledContent("请求发起于") { Text(date, style: .relative) }
+                    .accessibilityLabel("一次性授权码")
+                    .onChange(of: code) { _, value in
+                        if value.count == 9, request == nil, decision == nil, !isWorking { lookup() }
                     }
-                    SettingsPickerRow(title: String(localized: "允许访问的联系人"),
-                        value: request.contacts.first { $0.id == contactID }?.display_name ?? String(localized: "请选择"), selection: $contactID) {
-                        Text("请选择").tag(nil as String?)
-                        ForEach(request.contacts) { Text($0.display_name).tag(Optional($0.id)) }
+                Text("填入 ChatGPT 或 Claude 授权网页上显示的 8 位授权码，填满后自动读取。")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if request == nil, decision == nil {
+                    if isWorking { ProgressView().frame(maxWidth: .infinity) }
+                    if let issue {
+                        Text(issue).font(.footnote).foregroundStyle(.red)
+                        primaryButton(String(localized: "重新读取"), symbol: "arrow.clockwise") { lookup() }
+                            .disabled(code.count != 9 || isWorking)
                     }
-                    Text("这个 MCP 客户端可以查看这位联系人的通话文字、发送回复及发起或结束通话。它不能访问其他联系人或云端备份。仅确认你刚刚发起的授权。")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    if request.contacts.isEmpty {
-                        Text("此服务还没有 MCP 联系人，请先在联系人设置中选择 MCP 模式并保存。")
+                }
+            }
+            if let request, decision == nil {
+                step("02", title: String(localized: "确认授权"), caption: "REQUEST") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(String(localized: "\(request.client_name) 请求连接"), systemImage: "link")
+                            .font(.subheadline.weight(.semibold))
+                        if let date = request.requestedAt {
+                            HStack(spacing: 4) {
+                                Text("请求发起于")
+                                Text(date, style: .relative)
+                            }
+                            .font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Divider()
+                        SettingsPickerRow(title: String(localized: "允许访问的联系人"),
+                            value: request.contacts.first { $0.id == contactID }?.display_name ?? String(localized: "请选择"), selection: $contactID) {
+                            Text("请选择").tag(nil as String?)
+                            ForEach(request.contacts) { Text($0.display_name).tag(Optional($0.id)) }
+                        }
+                        Text("这个 MCP 客户端可以查看这位联系人的通话文字、发送回复及发起或结束通话。它不能访问其他联系人或云端备份。仅确认你刚刚发起的授权。")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        if request.contacts.isEmpty {
+                            Text("此服务还没有 MCP 联系人，请先在联系人设置中选择 MCP 模式并保存。")
+                                .font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(14)
+                    .background(Color.settingsSurface(lightOpacity: 0.055), in: RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.75))
+                    primaryButton(String(localized: "同意授权"), symbol: "checkmark.shield") { decide(approve: true) }
+                        .disabled(contactID == nil || isWorking)
+                    Button("拒绝", role: .destructive) { decide(approve: false) }
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .disabled(isWorking)
+                    if isWorking { ProgressView().frame(maxWidth: .infinity) }
+                    if let issue { Text(issue).font(.footnote).foregroundStyle(.red) }
+                }
+            }
+            if let decision {
+                step("02", title: decision.approved ? String(localized: "授权完成") : String(localized: "已拒绝"), caption: "DONE") {
+                    Label(decision.approved ? String(localized: "已授权") : String(localized: "已拒绝此次授权。"),
+                          systemImage: decision.approved ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(decision.approved ? Color.green : Color.secondary)
+                    if decision.approved {
+                        Text("回到 ChatGPT 或 Claude 里的授权页面，页面会自动继续；没有反应时刷新该页面。")
+                            .font(.subheadline)
+                        Link("在浏览器中继续", destination: decision.continuation_url)
+                            .font(.footnote.weight(.medium))
+                        Text("仅适用于在浏览器里发起的授权；在 ChatGPT 或 Claude App 内发起时，直接回到该 App。")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
-                    Button("同意授权") { decide(approve: true) }
-                        .disabled(contactID == nil || isWorking)
-                    Button("拒绝", role: .destructive) { decide(approve: false) }.disabled(isWorking)
-                } else {
-                    Button("读取授权请求") { lookup() }.disabled(code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isWorking)
                 }
-                if isWorking { ProgressView() }
-                if let issue { Text(issue).font(.footnote).foregroundStyle(.red) }
-            } header: {
-                SettingsSectionHeading(title: String(localized: "授权连接"), caption: "OAUTH")
+            }
+            Section {
+                Label("只输入你自己刚在浏览器里看到的授权码。别人发给你的码不要输入，也不要替别人批准授权。", systemImage: "exclamationmark.shield")
+                    .font(.footnote).foregroundStyle(.orange)
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
         }
         .modifier(SettingsPageStyle(title: String(localized: "MCP OAuth 授权"), subtitle: connection.name, symbol: "key", index: "MCP OAUTH", dismissDisabled: isWorking))
+    }
+
+    /// Uppercase, keep the code alphabet only, and show it as XXXX-XXXX.
+    private static func formatted(_ value: String) -> String {
+        let characters = value.uppercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }.prefix(8)
+        return characters.count > 4 ? String(characters.prefix(4)) + "-" + String(characters.dropFirst(4)) : String(characters)
+    }
+
+    private func step<Content: View>(_ number: String, title: String, caption: String, @ViewBuilder content: () -> Content) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+        } header: {
+            SettingsSectionHeading(number: number, title: title, caption: caption)
+        }
+    }
+
+    private func primaryButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.medium))
+                .frame(maxWidth: .infinity, minHeight: 46)
+                .foregroundStyle(Color.accentColor)
+                .background(Color.settingsSurface(lightOpacity: 0.12), in: RoundedRectangle(cornerRadius: 4))
+                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.75))
+        }
+        .buttonStyle(.plain)
     }
 
     private func lookup() {
@@ -142,7 +221,8 @@ struct MCPOAuthAuthorizationSettings: View {
             do {
                 let result = try await client.lookupMCPOAuth(connection: connection, code: code)
                 request = result
-                contactID = result.contacts.count == 1 ? result.contacts.first?.id : nil
+                contactID = result.contacts.contains(where: { $0.id == preferredContactID }) ? preferredContactID
+                    : result.contacts.count == 1 ? result.contacts.first?.id : nil
             } catch { issue = authorizationIssue(error) }
         }
     }

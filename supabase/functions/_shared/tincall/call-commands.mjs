@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Chuli (GitHub: chuli1122) <https://github.com/chuli1122/Tincall>
 // SPDX-License-Identifier: LicenseRef-Tincall-Personal-Use
 
-import {ConnectorError, ensure, uuid, requiredText, integer, publicCall} from './protocol.mjs';
+import {ConnectorError, ensure, uuid, requiredText, integer, publicCall, withoutRecordMedia, recordMediaIDs} from './protocol.mjs';
 
 const EVENTS_POLL_MS = 250;
 
@@ -63,6 +63,47 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
   async function command(principal, action, payload, signal) {
     const p = {...payload};
     if(action==='record.list' && p.after!==undefined)ensure(typeof p.after==='string' && Number.isFinite(Date.parse(p.after)),'invalid_cursor');
+    // Only the phone chooses who speaks first. A deferred opening is created later by call.open.
+    if (p.opening !== undefined) {
+      ensure(['call.create','call.accept'].includes(action) && !principal.contact_id, 'forbidden', 403);
+      ensure(p.opening === 'deferred', 'invalid_opening');
+    }
+    if (action === 'record.usage') {
+      ensure(!principal.contact_id, 'forbidden', 403);
+      const total = {records: 0, audio_count: 0, audio_bytes: 0, image_count: 0, image_bytes: 0};
+      for (const row of await store.recordSummaries(principal.owner_id, null)) {
+        total.records += 1;
+        for (const key of ['audio_count','audio_bytes','image_count','image_bytes']) total[key] += Number(row[key]) || 0;
+      }
+      return total;
+    }
+    // Removes recordings and/or images from one backup while keeping its text: the
+    // document is rewritten at the expected revision, then unreferenced objects are
+    // deleted. A retry with the same request_id replays the write and finishes cleanup.
+    if (action === 'record.media_remove') {
+      ensure(!principal.contact_id, 'forbidden', 403);
+      ensure(Object.keys(p).every(key => ['request_id','record_id','expected_revision','audio','images'].includes(key)), 'invalid_arguments');
+      uuid(p.request_id, 'request_id'); uuid(p.record_id, 'record_id'); integer(p.expected_revision, 'expected_revision');
+      ensure(typeof p.audio === 'boolean' && typeof p.images === 'boolean' && (p.audio || p.images), 'invalid_arguments');
+      const current = (await store.command(principal.owner_id, 'record.get', {record_id: p.record_id}, {signal})).record;
+      ensure(current && !current.deleted && current.record, 'record_not_found', 404);
+      const result = await command(principal, 'record.put', {request_id: p.request_id, record_id: p.record_id,
+        expected_revision: p.expected_revision, record: withoutRecordMedia(current.record, p)}, signal);
+      // A replayed request returns its original result; keep what the copy references now.
+      const latest = (await store.command(principal.owner_id, 'record.get', {record_id: p.record_id}, {signal})).record;
+      const linked = await linkedCallRecord(principal.owner_id, p.record_id, signal);
+      const keep = [...recordMediaIDs(result.record?.record), ...recordMediaIDs(latest?.record),
+        ...(linked?.messages ?? []).flatMap(message => (message.images ?? []).map(image => image.id))];
+      await store.deleteRecordMedia(principal.owner_id, p.record_id, keep);
+      return result;
+    }
+    if (action === 'call.open') {
+      ensure(!principal.contact_id, 'forbidden', 403);
+      uuid(p.request_id, 'request_id');
+      const data = await scopedCall(principal, p.call_id, signal);
+      await ensureOpening(principal, data.call);
+      return {call: publicCall((await store.command(principal.owner_id, 'call.record', {call_id: data.call.id}, {signal})).call)};
+    }
     let source = p.source;
     let liveActivityPush;
     let callAccessExpiry;
@@ -219,13 +260,26 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
       }
     }
     let data = await store.command(principal.owner_id, action, p, {signal});
+    if (action === 'record.list' && data.records?.length && store.recordSummaries) {
+      // Name, start time and media totals let the phone list cloud-only backups.
+      try {
+        const summaries = new Map((await store.recordSummaries(principal.owner_id, data.records.map(record => record.id)))
+          .map(({id, ...summary}) => [String(id).toLowerCase(), summary]));
+        data = {...data, records: data.records.map(record => {
+          const summary = summaries.get(String(record.id).toLowerCase());
+          return summary ? {...record, summary} : record;
+        })};
+      } catch (error) {
+        if (!(error instanceof ConnectorError && error.code === 'record_summaries_update_required')) throw error;
+      }
+    }
     if ((action === 'call.create' || action === 'call.incoming') && voicePrompt !== undefined && store.setVoicePrompt) {
       await store.setVoicePrompt(principal.owner_id, p.call_id, voicePrompt);
     }
     if(action==='call.create' && p.user_name!==undefined)await store.mcpCommand(principal.owner_id,null,'profile',{call_id:p.call_id,user_name:p.user_name});
     if (action === 'call.accept' || action === 'call.create') {
       if(action==='call.accept')await store.callPresence?.('touch',principal.owner_id,p.call_id);
-      await ensureOpening(principal, data.call);
+      if (p.opening !== 'deferred') await ensureOpening(principal, data.call);
     }
     if(action==='record.delete' && store.deleteRecordMedia) await store.deleteRecordMedia(principal.owner_id,p.record_id,preservedImages);
     if (data?.call) data = {...data, call: publicCall(data.call)};
@@ -264,5 +318,5 @@ export function createCallCommands({store, config, schedule, runOwner, fetcher, 
       await store.mcpCommand(principal.owner_id, principal.contact_id ?? null, 'open', {call_id:call.id});
     }
   }
-  return {command, bindingFor, upsertMCPRole, ensureOpening, waitForEvents};
+  return {command, bindingFor, upsertMCPRole, waitForEvents};
 }

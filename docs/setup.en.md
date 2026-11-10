@@ -55,6 +55,8 @@ Create a contact, select Standalone mode and the saved connections, then place a
 
 The management token is not persisted and may be revoked after deployment. Regular phone/worker credentials and deployment records are kept separately. If deployment fails, retry on the original phone: existing resources are preserved. If the project has another installation but this phone has no matching deployment record, connect to the existing service instead of initializing over it.
 
+Free Supabase projects pause after a period without access. With Cloud Sync → “Automatically Sync Call Content” on, Tincall syncs each time you open the app or return to it, so regular use keeps the project active. You can also turn on Tincall in iPhone Settings → General → Background App Refresh; iOS then lets Tincall reach the service in the background from time to time. iOS decides when, it does not run after you swipe the app away, and it cannot guarantee the project never pauses. A paused project can be restored in the Supabase dashboard.
+
 ### Node on your computer or server
 
 Install Node.js LTS with built-in SQLite, at least 22.5; Node 24 is recommended. From the source root:

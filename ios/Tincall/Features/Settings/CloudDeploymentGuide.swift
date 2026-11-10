@@ -6,6 +6,8 @@ import SwiftUI
 struct CloudDeploymentGuide<NextSteps: View>: View {
     private let deploymentGuideURL = URL(string: "https://github.com/chuli1122/Tincall/blob/main/connector/README.md")
     let connectExisting: Bool
+    /// Already deployed Supabase projects, so an update only needs a new access token.
+    let deployedProjects: [(name: String, ref: String)]
     let onConnect: (ConnectionProfile, String) async throws -> Void
     let nextSteps: NextSteps
     @Environment(\.dismiss) private var dismiss
@@ -24,9 +26,18 @@ struct CloudDeploymentGuide<NextSteps: View>: View {
     @State private var deploymentFinished = false
     @State private var deploymentError: String?
 
-    init(connectExisting: Bool = false, @ViewBuilder nextSteps: () -> NextSteps,
+    init(connectExisting: Bool = false, savedConnections: [ConnectionProfile] = [], @ViewBuilder nextSteps: () -> NextSteps,
          onConnect: @escaping (ConnectionProfile, String) async throws -> Void) {
         self.connectExisting = connectExisting
+        var seen = Set<String>()
+        self.deployedProjects = savedConnections.compactMap { connection in
+            // One-click deployments save https://<ref>.supabase.co/functions/v1/tincall.
+            guard connection.provider == .genericConnector, let url = connection.endpoint, url.scheme == "https",
+                  let host = url.host?.lowercased(), host.hasSuffix(".supabase.co"), url.path == "/functions/v1/tincall" else { return nil }
+            let ref = String(host.dropLast(".supabase.co".count))
+            guard seen.insert(ref).inserted else { return nil }
+            return (connection.name, ref)
+        }
         self.onConnect = onConnect
         self.nextSteps = nextSteps()
         _deployment = State(initialValue: SupabaseDeploymentService(onConnect: onConnect))
@@ -114,11 +125,36 @@ struct CloudDeploymentGuide<NextSteps: View>: View {
             }
             deploymentStep("02", title: "填写项目地址", caption: "URL") {
                 deploymentInput("Supabase 项目地址") {
-                    TextField("https://项目编号.supabase.co", text: $deploymentProjectRef)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    HStack(spacing: 8) {
+                        TextField("https://项目编号.supabase.co", text: $deploymentProjectRef)
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        if !deployedProjects.isEmpty {
+                            Menu {
+                                Section("已部署的服务") {
+                                    ForEach(deployedProjects, id: \.ref) { project in
+                                        Button { deploymentProjectRef = "https://\(project.ref).supabase.co" } label: {
+                                            Text(project.name)
+                                            Text(project.ref)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                // Keep the field's height: the input already adds vertical padding.
+                                Image(systemName: "chevron.down.circle")
+                                    .foregroundStyle(Color.accentColor)
+                                    .frame(width: 32, height: 22)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("选择已部署的服务")
+                        }
+                    }
                 }
                 .disabled(deploymentRequested || deploymentFinished)
+                if !deployedProjects.isEmpty {
+                    Text("更新已有服务时，点右侧按钮直接选择。")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("项目页面 → Copy → Project URL")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -383,6 +419,9 @@ struct DeploymentHelpButton: View {
     let detail: LocalizedStringResource
     var systemImage: String? = nil
     var isAccented = false
+    /// An optional step the reader takes from inside the explanation.
+    var actionTitle: LocalizedStringResource? = nil
+    var action: (() -> Void)? = nil
     @State private var isPresented = false
 
     var body: some View {
@@ -409,7 +448,8 @@ struct DeploymentHelpButton: View {
         .accessibilityLabel(Text(title))
         .anchorPreference(key: DeploymentHelpPreference.self, value: .bounds) { anchor in
             isPresented ? DeploymentHelpPresentation(anchor: anchor, heading: heading, detail: detail,
-                                                     dismiss: { isPresented = false }) : nil
+                                                     dismiss: { isPresented = false },
+                                                     actionTitle: actionTitle, action: action) : nil
         }
     }
 }
@@ -419,6 +459,8 @@ private struct DeploymentHelpPresentation {
     let heading: LocalizedStringResource?
     let detail: LocalizedStringResource
     let dismiss: () -> Void
+    var actionTitle: LocalizedStringResource?
+    var action: (() -> Void)?
 }
 
 private struct DeploymentHelpPreference: PreferenceKey {
@@ -447,8 +489,9 @@ struct DeploymentHelpOverlay: ViewModifier {
                         .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 12))
                         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.75))
                         .shadow(color: .black.opacity(0.14), radius: 12, y: 6)
+                        // The opaque panel already stops taps reaching the dismiss layer;
+                        // a tap gesture here would swallow its close and action buttons.
                         .contentShape(RoundedRectangle(cornerRadius: 12))
-                        .onTapGesture { }
                         .accessibilityAddTraits(.isModal)
                         .accessibilityAction(.escape, help.dismiss)
                     }
@@ -459,19 +502,23 @@ struct DeploymentHelpOverlay: ViewModifier {
 
     private func panelContent(_ help: DeploymentHelpPresentation) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Tapping outside closes the panel, like a system popover.
             if let heading = help.heading {
-                HStack(spacing: 12) {
-                    Text(heading).font(.subheadline.weight(.semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    Spacer(minLength: 0)
-                    closeButton(help.dismiss)
+                Text(heading).font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+            }
+            detailText(help.detail)
+            if let title = help.actionTitle, let action = help.action {
+                Button {
+                    help.dismiss()
+                    action()
+                } label: {
+                    Label { Text(title) } icon: { Image(systemName: "key") }
+                        .font(.footnote.weight(.semibold))
+                        .frame(minHeight: 44)
                 }
-                detailText(help.detail)
-            } else {
-                HStack(alignment: .top, spacing: 8) {
-                    detailText(help.detail)
-                    closeButton(help.dismiss)
-                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
             }
         }
         .padding(16)
@@ -481,17 +528,6 @@ struct DeploymentHelpOverlay: ViewModifier {
         Text(detail)
             .font(.footnote).lineSpacing(3)
             .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private func closeButton(_ dismiss: @escaping () -> Void) -> some View {
-        Button(action: dismiss) {
-            Image(systemName: "xmark")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 32, height: 32)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("收起说明")
     }
 }
 

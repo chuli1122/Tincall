@@ -328,7 +328,13 @@ struct RecordDetailScreen: View {
     }
 
     private func recordDate(_ record: CallRecord) -> some View {
-        Text(record.startedAt, format: .dateTime.year().month().day().hour().minute())
+        HStack(spacing: 6) {
+            if let incoming = record.incoming {
+                Text(incoming ? "来电" : "去电")
+                Text("·")
+            }
+            Text(record.startedAt, format: .dateTime.year().month().day().hour().minute())
+        }
     }
 
     @ViewBuilder

@@ -44,6 +44,7 @@ enum CloudDeploymentStep: String, Codable, CaseIterable, Sendable {
     case callContext = "迁移：MCP 通话与授权保护"
     case mcpWaitPreferences = "迁移：MCP 等待偏好"
     case hotPathIndexes = "迁移：通话查询索引"
+    case recordSummaries = "迁移：云端记录摘要"
     case secrets = "写入函数 secrets", function = "部署 Edge Function", vault = "填写 Vault"
     case owner = "取得服务密钥并建立 owner", binding = "绑定手机令牌与 owner", push = "开通官方来电推送", connection = "检查能力并保存连接"
 }
@@ -399,7 +400,8 @@ final class SupabaseDeploymentService {
                                      Migration(version: "202610220001", name: "tincall_service_safety", step: .serviceSafety),
                                      Migration(version: "202610220002", name: "tincall_mcp_safety", step: .callContext),
                                      Migration(version: "202610250001", name: "tincall_mcp_wait_preferences", step: .mcpWaitPreferences),
-                                     Migration(version: "202610270001", name: "tincall_hot_path_indexes", step: .hotPathIndexes)]
+                                     Migration(version: "202610270001", name: "tincall_hot_path_indexes", step: .hotPathIndexes),
+                                     Migration(version: "202611100001", name: "tincall_record_summaries", step: .recordSummaries)]
     private static let versions = Set(migrations.map(\.version))
     private struct History: Decodable { let version: String; let name: String? }
     private static func history(_ client: SupabaseManagementClient, ref: String, pat: String) async throws -> [History] {
@@ -455,7 +457,7 @@ final class SupabaseDeploymentService {
         let expectedTables = (applied.contains(migrations[0].version) ? connectorTables : []).union(applied.contains(migrations[2].version) ? ["tincall_mcp_roles"] : []).union(applied.contains(migrations[5].version) ? ["tincall_mcp_sse"] : []).union(applied.contains(migrations[9].version) ? ["tincall_oauth_clients", "tincall_oauth_requests", "tincall_oauth_grants"] : []).union(applied.contains(migrations[12].version) ? ["tincall_wake_bridges"] : [])
         let expectedFunctions = (applied.contains(migrations[0].version) ? connectorFunctions : []).union(applied.contains(migrations[2].version) ? roleFunctions : []).union(applied.contains(migrations[3].version) ? voiceInstructionFunctions : []).union(applied.contains(migrations[4].version) ? ["tincall_recent_calls"] : []).union(applied.contains(migrations[5].version) ? ["tincall_mcp_sse_command"] : []).union(applied.contains(migrations[6].version) ? ["tincall_mcp"] : []).union(applied.contains(migrations[7].version) ? ["tincall_schedule_command", "tincall_schedule_next"] : []).union(applied.contains(migrations[8].version) ? ["tincall_broadcast_incoming"] : []).union(applied.contains(migrations[9].version) ? ["tincall_oauth"] : []).union(applied.contains(migrations[10].version) ? ["tincall_call_presence"] : []).union(applied.contains(migrations[11].version) ? ["tincall_contact_mode"] : []).union(applied.contains(migrations[12].version) ? ["tincall_wake_bridge", "tincall_broadcast_wake"] : [])
         guard Set(footprint.tables) == expectedTables,
-              Set(footprint.functions) == expectedFunctions.union(images ? ["tincall_image_command"] : []).union(applied.contains("202610220001") ? ["tincall_remove_push_device"] : []).union(applied.contains("202610220002") ? ["tincall_resolve_call_context"] : []),
+              Set(footprint.functions) == expectedFunctions.union(images ? ["tincall_image_command"] : []).union(applied.contains("202610220001") ? ["tincall_remove_push_device"] : []).union(applied.contains("202610220002") ? ["tincall_resolve_call_context"] : []).union(applied.contains("202611100001") ? ["tincall_record_summaries"] : []),
               footprint.has_images == images,
               Set(footprint.policies) == (applied.contains(migrations[0].version) && !applied.contains("202610220001") ? mediaPolicies : []),
               footprint.bucket == applied.contains(migrations[0].version), !footprint.bucket || footprint.private_bucket,
@@ -487,6 +489,8 @@ final class SupabaseDeploymentService {
             guardSQL = "if to_regprocedure('public.tincall_mcp(text,uuid,text,jsonb)') is null then raise exception 'tincall_install_conflict'; end if;"
         case .hotPathIndexes:
             guardSQL = "if to_regclass('public.tincall_messages') is null or to_regclass('public.tincall_jobs') is null or to_regclass('public.tincall_push_jobs') is null or to_regclass('public.tincall_requests') is null then raise exception 'tincall_install_conflict'; end if;"
+        case .recordSummaries:
+            guardSQL = "if to_regclass('public.tincall_records') is null or exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='tincall_record_summaries') then raise exception 'tincall_install_conflict'; end if;"
         case .mcpWaitPreferences:
             guardSQL = "if to_regclass('public.tincall_mcp_roles') is null or exists(select 1 from information_schema.columns where table_schema='public' and table_name='tincall_mcp_roles' and column_name='mcp_wait_timeout_seconds') then raise exception 'tincall_install_conflict'; end if;"
         case .messageImages:

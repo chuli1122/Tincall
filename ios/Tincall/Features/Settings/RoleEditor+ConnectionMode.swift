@@ -138,10 +138,12 @@ extension RoleEditor {
         }
     }
 
-    private var mcpIntegrationLinks: some View {
+    private func mcpIntegrationLinks(_ connection: ConnectionProfile) -> some View {
         HStack(spacing: 18) {
-            DeploymentHelpButton(title: "ChatGPT 接入", detail: "1. 复制上面的完整 URL，地址已包含 /mcp，不要重复追加。传输方式选 HTTP。\n\n2. 在 ChatGPT 添加自定义 MCP，身份验证选择 OAuth，使用动态客户端注册。\n\n3. 授权页显示一次性授权码后，到 Tincall 的「设置 → Tincall 云端」打开对应连接的「MCP OAuth 授权」，输入授权码，选择这位联系人并同意。\n\n4. 回到刚才的授权网页完成连接，再返回 ChatGPT 加载工具。", isAccented: true)
-            DeploymentHelpButton(title: "Claude 接入", detail: "1. 复制上面的完整 URL，填入 Claude 的 Add custom connector。\n\n2. Authentication 选择 Sign in now，OAuth client 选择 Register automatically，Transport 使用 Streamable HTTP。\n\n3. 授权页显示一次性授权码后，到 Tincall 的「设置 → Tincall 云端」打开对应连接的「MCP OAuth 授权」，输入授权码，选择这位联系人并同意。\n\n4. 回到刚才的授权网页完成连接，再返回 Claude 加载工具。", isAccented: true)
+            DeploymentHelpButton(title: "ChatGPT 接入", detail: "1. 复制上面的完整 URL，地址已包含 /mcp，不要重复追加。传输方式选 HTTP。\n\n2. 在 ChatGPT 添加自定义 MCP，身份验证选择 OAuth，使用动态客户端注册。\n\n3. 授权页显示一次性授权码后，点下方「输入授权码」，填入授权码并同意。\n\n4. 回到 ChatGPT 里的授权页面，页面会自动继续；没有反应时刷新该页面。连接后加载工具。", isAccented: true,
+                                 actionTitle: "输入授权码", action: { oauthAuthorizationConnection = connection })
+            DeploymentHelpButton(title: "Claude 接入", detail: "1. 复制上面的完整 URL，填入 Claude 的 Add custom connector。\n\n2. Authentication 选择 Sign in now，OAuth client 选择 Register automatically，Transport 使用 Streamable HTTP。\n\n3. 授权页显示一次性授权码后，点下方「输入授权码」，填入授权码并同意。\n\n4. 回到 Claude 里的授权页面，页面会自动继续；没有反应时刷新该页面。连接后加载工具。", isAccented: true,
+                                 actionTitle: "输入授权码", action: { oauthAuthorizationConnection = connection })
         }
         .font(.footnote.weight(.medium))
         .foregroundStyle(Color.accentColor)
@@ -267,7 +269,7 @@ extension RoleEditor {
             } else if let configuration = mcpSetup.configuration {
                 let address = mcpUsesSSE ? configuration.mcp_url.appendingPathComponent("sse") : configuration.mcp_url
                 mcpCredentialRows(address: address, authorization: "Bearer \(configuration.token)")
-                mcpIntegrationLinks
+                mcpIntegrationLinks(connection)
             } else if mcpSetup.manualDirectory == nil {
                 Text("点右上角 ✓ 保存联系人后，可复制 URL 和 Authorization，填入 AI 平台的 MCP 服务设置。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -313,24 +315,15 @@ extension RoleEditor {
     }
 
     private var mcpWaitTimeoutField: some View {
-        HStack(spacing: 6) {
-            Text("MCP 等待时长")
-            DeploymentHelpButton(title: "MCP 等待时长说明", detail: "AI 回复后，最多等待你下一句话的时间。可填写 1–130 秒，默认 120 秒；超出范围会自动调整。\n\n等待超时不会挂断通话。", systemImage: "info.circle")
-            Spacer(minLength: 0)
-            TextField("120", value: Binding(
-                get: { role.effectiveMCPWaitTimeoutSeconds },
-                set: { role.mcpWaitTimeoutSeconds = min(130, max(1, $0)) }
-            ), format: .number)
-            .keyboardType(.numberPad)
-            .multilineTextAlignment(.trailing)
-            .monospacedDigit()
-            .frame(width: 72)
-            .textFieldStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("MCP 等待时长")
-            Text("秒").foregroundStyle(.secondary)
+        SettingsSecondsRow("MCP 等待时长", placeholder: "120", value: Binding(
+            get: { role.effectiveMCPWaitTimeoutSeconds },
+            set: { role.mcpWaitTimeoutSeconds = min(130, max(1, $0)) }
+        )) {
+            HStack(spacing: 6) {
+                Text("MCP 等待时长")
+                DeploymentHelpButton(title: "MCP 等待时长说明", detail: "AI 回复后，最多等待你下一句话的时间。可填写 1–130 秒，默认 120 秒；超出范围会自动调整。\n\n等待超时不会挂断通话。", systemImage: "info.circle")
+            }
         }
-        .frame(minHeight: 44)
     }
 
     private var modeDescription: String {

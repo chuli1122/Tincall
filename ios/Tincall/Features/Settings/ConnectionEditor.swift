@@ -103,7 +103,7 @@ struct ConnectionEditor: View {
         SettingsList {
             Section {
                 if !connection.provider.isSpeechRecognition {
-                    SettingsField(title: connection.provider == .genericConnector ? String(localized: "配置名称") : String(localized: "预设名称")) { TextField("为这套连接起个名字", text: $connection.name).accessibilityLabel("名称") }
+                    SettingsField(title: connection.provider == .genericConnector ? String(localized: "配置名称") : String(localized: "预设名称")) { SettingsTextField(placeholder: String(localized: "为这套连接起个名字"), text: $connection.name).accessibilityLabel("名称") }
                         .disabled(isConnectionLocked || isCallActive)
                 }
                 if connection.provider == .openAICompatible || connection.provider == .genericConnector || connection.provider == .whisperCompatible {

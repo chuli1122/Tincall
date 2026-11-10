@@ -173,6 +173,82 @@ extension CallCoordinator {
             assistantInitiated: value.externalCallID != nil,
             audioInput: audio.map { (messageID: user.id, audio: $0) }) }
         catch { complete(turn, status: .failed, error: error); return }
+        streamModelReply(turn, context: context, connection: connection, role: role)
+    }
+
+    /// MCP waits for the cloud to open; an immediate opening is already created by the cloud or while ringing.
+    func defersCloudOpening(_ role: CallRole, incoming: Bool) -> Bool {
+        role.effectiveCallMode == .mcp && role.openingDelay(incoming: incoming) != .zero
+    }
+
+    func scheduleOpening(role: CallRole, incoming: Bool, session: VoiceSessionID) {
+        guard role.supportsOpeningSpeaker, let delay = role.openingDelay(incoming: incoming) else { return }
+        if delay == .zero && (incoming || role.effectiveCallMode == .mcp) { return }
+        scheduleOpening(after: delay, session: session)
+    }
+
+    /// Lets the contact speak first after `delay`, unless the person has already started.
+    func scheduleOpening(after delay: Duration?, session: VoiceSessionID) {
+        openingTask?.cancel()
+        openingTask = nil
+        guard let delay else { return }
+        openingTask = Task { [weak self] in
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            while !Task.isCancelled {
+                guard let self, self.session == session, self.phase == .active, self.turns[session.callID] == nil,
+                      self.records[session.callID]?.messages.isEmpty == true else { return }
+                if self.isUserSpeaking || self.isAwaitingSpeechTranscript || self.partialInput != nil || self.isTextInputActive {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    continue
+                }
+                self.openingTask = nil
+                await self.openContactTurn(session: session)
+                return
+            }
+        }
+    }
+
+    private func openContactTurn(session: VoiceSessionID) async {
+        guard let role else { return }
+        guard role.effectiveCallMode == .mcp else { beginStandaloneOpening(session: session); return }
+        guard let connection = externalConnections[session.callID] else { return }
+        do { try await external.openTurn(connection: connection, callID: session.callID) }
+        catch {
+            // The opening is optional: once the person has spoken there is nothing to report.
+            guard self.session == session, phase == .active, records[session.callID]?.messages.isEmpty == true else { return }
+            errorMessage = safeMessage(error)
+        }
+    }
+
+    /// Lets a standalone contact speak first without inventing a user message.
+    func beginStandaloneOpening(session: VoiceSessionID) {
+        guard let connection, let role, role.effectiveCallMode == .standalone, self.session == session,
+              phase == .active, turns[session.callID] == nil, var value = records[session.callID], value.messages.isEmpty else { return }
+        let assistant = CallMessage(turnID: UUID(), role: .assistant, text: "", status: .generating)
+        let turn = VoiceTurnID(session: session, turnID: assistant.turnID, messageID: assistant.id)
+        let context: CallContext
+        do { context = try CallContextBuilder.build(role: role, historyRecords: historyRecords, currentMessages: [], ttsConnection: ttsConnection,
+            userName: summaryUserName(), assistantInitiated: value.externalCallID != nil, calleeOpening: value.externalCallID == nil) }
+        catch { errorMessage = safeMessage(error); return }
+        value.messages.append(assistant)
+        do { try save(value) } catch { reportSavingFailure(error, callID: session.callID); return }
+        records[session.callID] = value
+        publish(session.callID)
+        RequestLogStore.shared.registerTurn(callID: session.callID, inputID: turn.turnID, turnID: turn.turnID)
+        turns[session.callID] = turn
+        errorMessage = nil
+        generation = .generating
+        playback = textOnly ? .idle : .synthesizing
+        currentPlaybackCaption = nil
+        if !textOnly {
+            do { try voice.beginReply(turn) }
+            catch { playback = .failed; errorMessage = safeMessage(error) }
+        }
+        streamModelReply(turn, context: context, connection: connection, role: role)
+    }
+
+    private func streamModelReply(_ turn: VoiceTurnID, context: CallContext, connection: ConnectionProfile, role: CallRole) {
+        let session = turn.session
         tasks[session.callID] = Task { [weak self, model] in
             do {
                 var timestampFilter = CallTimestampStreamFilter()

@@ -44,8 +44,9 @@ async function pending(client=undefined,overrides={}){
   const query=new URLSearchParams({client_id:client,redirect_uri:callback,response_type:'code',state:'synthetic-state',resource:base+'/mcp',scope:'tincall:mcp',code_challenge:challenge,code_challenge_method:'S256',...overrides});
   const response=await request('/oauth/authorize?'+query);assert.equal(response.status,303);
   const location=response.headers.get('location');
-  const page=await request(location);assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/plain/);
+  const page=await request(location);assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/html/);
   const text=await page.text();const code=text.match(/[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}/)[0];
+  assert.match(text,/http-equiv="refresh"/);assert.doesNotMatch(text,/<script/i);
   return {client,code,location};
 }
 async function approve(p,decision='approve',contact='contact-a'){

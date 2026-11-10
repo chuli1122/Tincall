@@ -49,6 +49,15 @@ export async function sendAPNs(env, device, payload, fetcher = fetch) {
     });
   } catch { throw new PushError('apns_unavailable', 503); }
   if (response.status === 200) { await response.body?.cancel(); return; }
-  await response.body?.cancel();
+  const rejection = await response.json().catch(() => null);
+  const knownReasons = ['BadDeviceToken', 'DeviceTokenNotForTopic', 'TopicDisallowed', 'BadTopic',
+    'InvalidProviderToken', 'ExpiredProviderToken', 'MissingProviderToken', 'BadCertificate',
+    'BadCertificateEnvironment', 'BadPriority', 'InvalidPushType', 'BadMessageId',
+    'PayloadEmpty', 'PayloadTooLarge', 'Unregistered', 'Forbidden', 'BadPath',
+    'TooManyRequests', 'TooManyProviderTokenUpdates', 'InternalServerError', 'ServiceUnavailable', 'Shutdown'];
+  console.warn('[apns-rejected]', JSON.stringify({
+    status: response.status, reason: knownReasons.includes(rejection?.reason) ? rejection.reason : 'unrecognized',
+    environment: sandbox ? 'sandbox' : 'production', pushType: activity ? 'liveactivity' : 'voip'
+  }));
   throw new PushError(response.status === 410 ? 'apns_device_expired' : 'apns_rejected', 502);
 }

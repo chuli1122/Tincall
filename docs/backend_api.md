@@ -100,7 +100,7 @@ MCP 工具调用与本文的手机 HTTP 接口是两套契约。本文说明后�
 ```json
 {
   "version": 1,
-  "server_version": 2026102601,
+  "server_version": 2026111003,
   "owner_id": "10000000-0000-4000-8000-000000000001",
   "events": "poll",
   "max_event_page": 100,
@@ -121,7 +121,7 @@ App 一键部署的 Supabase 是通话连接端，不自带人物回复生成。
 
 复用 Tincall 连接端时，后端模式必须绑定 `mode: "http"` 对象；误用 MCP 的 `tools` 对象时，创建通话和提交输入均返回 `backend_binding_required`（422）。能力列表与拨号复用同一校验：缺少生成／取消地址、URL 无效、HTTPS 不符或取消地址不同源时，`generation_configured` 和 `wake_supported` 均为 false。非法 URL 返回 `generation_url_invalid`（422）。完整自建后端按本节实现手机协议即可，内部不要求使用这套绑定配置。
 
-请求体：`request_id`（UUID，手机此处与 `call_id` 相同）、`call_id`（UUID）、`contact_id`（1–200 字符字符串）、`source`（后端模式为 `backend`）、`expression_prompt`（字符串，语音表达提示，可为空）、`user_name`（手机个人资料名字，可为空）。开启时间感知时另带 `time_awareness_enabled: true` 和 IANA 时区 `time_zone`。
+请求体：`request_id`（UUID，手机此处与 `call_id` 相同）、`call_id`（UUID）、`contact_id`（1–200 字符字符串）、`source`（后端模式为 `backend`）、`expression_prompt`（字符串，语音表达提示，可为空）、`user_name`（手机个人资料名字，可为空）。开启时间感知时另带 `time_awareness_enabled: true` 和 IANA 时区 `time_zone`。MCP 联系人不由对方立即开口时，手机另带 `opening: "deferred"`。
 
 返回：`{"call": <call>}`，新通话为 `active`，初始 `epoch` 为 0；发出 `call.started` 事件。
 
@@ -133,9 +133,15 @@ App 一键部署的 Supabase 是通话连接端，不自带人物回复生成。
 
 ### POST /calls/{call_id}/answer
 
-请求体：`request_id`（UUID）、`epoch`（当前通话代次）、`expression_prompt`（字符串，可为空）、`user_name`（手机个人资料名字，可为空）；开启时间感知时另带 `time_awareness_enabled: true` 和 `time_zone`（IANA 时区）。
+请求体：`request_id`（UUID）、`epoch`（当前通话代次）、`expression_prompt`（字符串，可为空）、`user_name`（手机个人资料名字，可为空）；开启时间感知时另带 `time_awareness_enabled: true` 和 `time_zone`（IANA 时区）；MCP 联系人不由对方立即开口时另带 `opening: "deferred"`。
 
 返回：`{"call": <call>}`，状态从 `ringing` 变为 `active`，发出 `call.started`，不递增 `epoch`。
+
+### POST /calls/{call_id}/open
+
+仅手机令牌可用。请求体：`request_id`（UUID）。MCP 联系人在接通时延后开场（`opening: "deferred"`）后，手机在约定的静默时间到达时调用，为对方建立开场回复目标；对方此后才收到“已接听”或被唤醒桥唤醒。用户已经开口（`epoch` 已大于 0）或开场已存在时不做任何事。返回：`{"call": <call>}`。
+
+AI 通过 `tincall_call` 拨出时，只有开场回复目标建立后才返回接听；用户先开口时，返回结果直接包含用户的第一句话。
 
 相关错误：`invalid_request_id`、`invalid_call_id`、`invalid_epoch`（400）；`call_not_found`（404）；`call_not_ringing`、`stale_epoch`、`invalid_expression_prompt`（409）。
 
@@ -249,7 +255,8 @@ Supabase 需要部署新版函数并应用 `202610200002_tincall_incoming_events
 
 | 路径 / 方法 | 请求字段 | 返回字段 |
 | --- | --- | --- |
-| `GET /records` | 查询参数 `after`（时间）、`after_id`（UUID），首次都可省略 | `records` 数组（每项 `id`、`revision`、`deleted`、`updated_at`），`next_cursor` 为 `{after, after_id}` 或 null；每页最多 100 项，无正文 |
+| `GET /records` | 查询参数 `after`（时间）、`after_id`（UUID），首次都可省略 | `records` 数组（每项 `id`、`revision`、`deleted`、`updated_at`，可带 `summary`），`next_cursor` 为 `{after, after_id}` 或 null；每页最多 100 项，无正文 |
+| `GET /records/usage` | 无请求体 | `records`（未删除备份数）、`audio_count`、`audio_bytes`、`image_count`、`image_bytes` |
 | `GET /records/{record_id}` | 无请求体 | `record` 对象或 null；对象字段 `id`、`revision`、`deleted`、`updated_at`、`record`（备份正文或 null） |
 | `POST /records/{record_id}` | `request_id`、`expected_revision`（首次为 0）、`record`（备份正文） | `record` 对象，`revision = expected_revision + 1` |
 | `POST /records/{record_id}/delete` | `request_id`、`expected_revision` | `record` 对象，`deleted: true`、正文 `record: null`，版本加 1 |
@@ -257,10 +264,15 @@ Supabase 需要部署新版函数并应用 `202610200002_tincall_incoming_events
 | `PUT /records/{record_id}/media/{asset_id}` | 原始媒体字节，`Content-Length`，`Content-Type` 为 `audio/*`、`image/*` 或 `application/octet-stream` | JSON `ok: true` |
 | `GET /records/{record_id}/media/{asset_id}` | 无请求体 | 原始媒体字节、`Content-Type`，可带 `Content-Length` |
 | `DELETE /records/{record_id}/media/{asset_id}` | 无请求体 | JSON `ok: true` |
+| `POST /records/{record_id}/remove-media` | `request_id`、`expected_revision`、`audio`、`images`（布尔，至少一项为 true） | `record` 对象，版本加 1；正文去掉录音索引和／或消息图片，文字与摘要保留 |
 
 备份正文为手机的 `CloudSyncDocument`：`format: "TincallRecord"`、`version: 1`、`call`（本地 `CallRecord`）、`media`（数组，每项 `object_id`、`asset`、`bytes`）。后端按 JSON 文档原样存取，完整本地记录结构见 [CloudSyncModels.swift](../ios/Tincall/Storage/CloudSyncModels.swift) 和 [CallModels.swift](../ios/Tincall/Core/CallModels.swift)。它不是前文简化的远端 `call` 对象，不能拿 `GET /calls/current` 的状态对象代替备份正文。
 
 记录按 `(updated_at, id)` 排序分页；手机用返回游标继续，直到空页。删除保留 tombstone，旧版本写入返回 `revision_conflict`（409），已删除旧上传请求的重放返回 `operation_retired`（409）。媒体清理有单次工作量限制，`media_cleanup_pending` / `media_cleanup_failed`（503）时需重试同一个删除请求 ID。
+
+`summary` 为列表用的简要信息：`role_name`、`started_at`（与 `call.startedAt` 相同的数字）、`audio_count`、`audio_bytes`、`image_count`、`image_bytes`，正文缺字段时为 null 或 0。Supabase 由迁移 `202611100001_tincall_record_summaries.sql` 提供；未执行该迁移的服务仍返回不带 `summary` 的列表。`/records/usage` 按这些信息汇总，数字来自备份正文中记录的大小，不等于存储服务的实际占用。
+
+单独删除云端录音或图片需先确认 `/capabilities` 返回 `record_media_removal: true`。后端在 `expected_revision` 上改写正文，再删除该记录目录下不再被正文或同 ID 连接端通话引用的媒体对象。媒体清理失败时返回 503，需用同一个 `request_id` 重试以完成清理。手机端会记住已删除的类别，之后同步不再上传这些媒体，也不会用缺图片的云端正文覆盖本机图片。
 
 批量清空备份需先确认 `/capabilities` 返回 `backup_only_deletion: true`，逐条调用 `/delete-backup`，不回退到会清除共享图片的 `/delete`。存在未结束的同 ID 连接端通话时返回 `call_busy`（409）。删除后，仍被连接端通话引用的图片可下载，其余备份媒体不可下载或重新上传。此接口无需新增 SQL 迁移，需更新服务程序。
 

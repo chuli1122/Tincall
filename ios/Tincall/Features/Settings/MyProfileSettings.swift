@@ -53,10 +53,8 @@ struct MyProfileSettings: View {
                     }
                     VStack(alignment: .leading, spacing: 9) {
                         Text("我的名字").font(.caption).foregroundStyle(.secondary)
-                        TextField("我", text: $profile.name)
-                            .font(.title3.weight(.medium))
+                        SettingsTextField(placeholder: String(localized: "我"), text: $profile.name, textStyle: .title3, weight: .medium)
                             .accessibilityLabel("我的名字")
-                            .submitLabel(.done)
                             .padding(.bottom, 9)
                             .overlay(alignment: .bottom) {
                                 Rectangle().fill(Color.primary.opacity(0.22)).frame(height: 0.75)
@@ -320,10 +318,10 @@ private struct SpeechRecognitionCorrectionSettings: View {
     private func ruleEditor(_ rule: Binding<SpeechRecognitionCorrection>) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             SettingsField(title: String(localized: "识别到")) {
-                TextField("输入识别错的词", text: rule.source)
+                SettingsTextField(placeholder: String(localized: "输入识别错的词"), text: rule.source, plain: true)
             }
             SettingsField(title: String(localized: "修正为")) {
-                TextField("输入正确的词", text: rule.replacement)
+                SettingsTextField(placeholder: String(localized: "输入正确的词"), text: rule.replacement, plain: true)
             }
             HStack(spacing: 20) {
                 if store.speechRecognitionCorrections.contains(where: { $0.id == rule.wrappedValue.id }) {

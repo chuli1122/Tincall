@@ -23,6 +23,7 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         var failNextEvents = false
         var createRequests = 0
         var answerRequests = 0
+        var openRequests = 0
         var submittedReply: UUID?
         var inputTexts: [String] = []
         var timePreferenceBodies: [[String: Any]] = []
@@ -112,6 +113,7 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         let result: [String: Any] = Self.fixture.lock.withLock {
             let f = Self.fixture
             if request.url!.path.hasSuffix("/answer") { f.answerRequests += 1 }
+            if request.url!.path.hasSuffix("/open") { f.openRequests += 1 }
             if request.url!.path.hasSuffix("/events") {
                 let after = Int(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "after" }!.value!)!
                 let events = Array(f.events().filter { ($0["sequence"] as! Int) > after && ($0["sequence"] as! Int) <= f.available }.prefix(f.pageLimit))
@@ -212,6 +214,8 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         defer { for value in [connector,tts] { try? credentials.delete(connectionID:value.id) } }
         var role = CallRole(name:"Synthetic", sttConnectionID:stt.id, ttsConnectionID:tts.id)
         role.callMode = .mcp; role.externalConnectionID = connector.id; role.externalRoleID = "synthetic"
+        // Existing checks cover an immediate cloud opening; the speaker variant covers the others.
+        role.openingSpeaker = .contact
         for connection in [connector, tts] { DataSharingConsent.setAllowed(true, for: connection) }
         defer {
             for connection in [connector, tts] {
@@ -225,6 +229,66 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         call.onSaveRecord = { _ in }
         let f = OpeningProtocol.fixture
         let callID = f.lock.withLock { f.call }
+        if CommandLine.arguments.contains("--opening-speaker-only") {
+            var plain = role
+            precondition(plain.openingDelay(incoming: true) == .zero && plain.openingDelay(incoming: false) == nil)
+            plain.mcpWakeBridgeEnabled = true
+            precondition(plain.openingDelay(incoming: false) == .zero)
+            plain.openingSpeaker = nil
+            precondition(plain.effectiveOpeningSpeaker == .wait && plain.openingDelay(incoming: false) == .seconds(3))
+            plain.openingWaitSeconds = 8
+            precondition(plain.openingDelay(incoming: false) == .seconds(8))
+            plain.openingWaitSeconds = 60
+            precondition(plain.openingDelay(incoming: false) == .seconds(10))
+            plain.openingSpeaker = .user
+            precondition(plain.openingDelay(incoming: true) == nil)
+            plain.callMode = .backend
+            precondition(!plain.supportsOpeningSpeaker)
+            print("PASS: opening speaker resolves per mode and direction")
+
+            // An answered MCP call defers the cloud opening, then opens after the silent wait.
+            var waiting = role
+            waiting.openingSpeaker = .wait
+            f.lock.withLock { f.available = 0 }
+            try await call.prepareIncoming(callID: callID, role: waiting, connector: connector,
+                connections: [connector, stt, tts], retention: AudioRetention())
+            try await call.confirmIncoming(callID: callID)
+            precondition(f.lock.withLock { f.timePreferenceBodies.last?["opening"] as? String } == "deferred")
+            try await call.activatePreparedIncoming(callID: callID)
+            precondition(f.lock.withLock { f.openRequests } == 0)
+            let deadline = Date().addingTimeInterval(6)
+            while f.lock.withLock({ f.openRequests }) == 0 {
+                precondition(Date() < deadline, "Deferred opening was not requested")
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            call.hangUp()
+            print("PASS: deferred MCP opening is requested after the silent wait")
+
+            // A standalone contact set to speak first opens a phone-dialed call as the callee.
+            let model = ConnectionProfile(name: "Synthetic model", provider: .openAICompatible,
+                endpoint: URL(string: "https://mcp-opening.invalid"), model: "synthetic")
+            DataSharingConsent.setAllowed(true, for: model)
+            defer { DataSharingConsent.setAllowed(false, for: model) }
+            try credentials.write("synthetic-fixture-only", connectionID: model.id)
+            defer { try? credentials.delete(connectionID: model.id) }
+            var standalone = CallRole(name: "Synthetic", modelConnectionID: model.id, sttConnectionID: stt.id, ttsConnectionID: tts.id)
+            standalone.openingSpeaker = .contact
+            let outgoingVoice = OpeningVoice()
+            let outgoing = CallCoordinator(voice: outgoingVoice,
+                model: ChatCompletionClient(credentials: credentials, configuration: configuration),
+                external: ExternalCallClient(credentials: credentials, configuration: configuration))
+            outgoing.onSaveRecord = { _ in }
+            let before = f.lock.withLock { f.modelRequests.count }
+            await outgoing.start(role: standalone, connections: [model, stt, tts], retention: AudioRetention())
+            try await until { outgoing.generation == .completed || outgoing.generation == .failed }
+            precondition(outgoing.generation == .completed, outgoing.errorMessage ?? "opening failed")
+            let request = f.lock.withLock { f.modelRequests.count == before + 1 ? f.modelRequests.last : nil }
+            precondition((request?.last?["content"] as? String)?.contains("对方打来电话") == true)
+            precondition(outgoing.record?.messages.map(\.role) == [.assistant])
+            outgoing.hangUp()
+            print("PASS: standalone outgoing opening speaks first as the callee")
+            return
+        }
         if CommandLine.arguments.contains("--voice-sent-sound-only") {
             f.lock.withLock { f.available = 0 }
             try await call.prepareIncoming(callID: callID, role: role, connector: connector,
@@ -775,6 +839,7 @@ private final class OpeningProtocol: URLProtocol, @unchecked Sendable {
         defer { try? credentials.delete(connectionID: model.id) }
         var independentRole = CallRole(name: "Synthetic", modelConnectionID: model.id, sttConnectionID: stt.id, ttsConnectionID: tts.id)
         independentRole.callMode = .standalone
+        independentRole.openingSpeaker = .contact
         let scheduledCallID = UUID()
         f.lock.withLock {
             f.call = scheduledCallID; f.available = 0; f.epoch = 0; f.ended = false

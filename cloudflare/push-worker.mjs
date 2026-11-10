@@ -153,6 +153,15 @@ export class PushRegistry {
           binding_id=excluded.binding_id, device_token=excluded.device_token, environment=excluded.environment, calls_valid_until=excluded.calls_valid_until, enabled=1 RETURNING binding_id`,
           p.device_id.toLowerCase(), binding, p.device_token, p.environment, until).toArray()[0];
         if (previous && previous.binding_id !== binding) this.activities.remove(previous.binding_id);
+        // A reinstall keeps the APNs token but creates a new device ID. Drop the old
+        // registration so one call is not delivered twice with an unknown device ID.
+        const stale = this.sql.exec('SELECT binding_id FROM devices WHERE device_token=? AND device_id<>?',
+          p.device_token, p.device_id.toLowerCase()).toArray();
+        for (const device of stale) {
+          this.activities.remove(device.binding_id);
+          this.sql.exec('DELETE FROM deliveries WHERE binding_id=?', device.binding_id);
+          this.sql.exec('DELETE FROM devices WHERE binding_id=?', device.binding_id);
+        }
         this.activities.register(result.binding_id, p.live_activity_start_token);
         return json({ ...result, live_activity_push: true, call_access_expiry: true });
       }

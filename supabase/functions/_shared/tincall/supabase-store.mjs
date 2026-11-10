@@ -21,6 +21,7 @@ export function createSupabaseStore(config, fetcher = fetch) {
       }
       if (name === 'tincall_contact_mode' && ['PGRST202','42883'].includes(body.code)) throw new ConnectorError('contact_mode_update_required',422);
       if (name === 'tincall_wake_bridge' && ['PGRST202','42883'].includes(body.code)) throw new ConnectorError('wake_bridge_update_required',422);
+      if (name === 'tincall_record_summaries' && ['PGRST202','42883'].includes(body.code)) throw new ConnectorError('record_summaries_update_required',422);
       const allowed = new Set(['forbidden','unauthorized','idempotency_conflict','call_busy','call_not_found','call_ended',
         'stale_epoch','call_not_ringing','call_not_active','reply_not_found','final_text_rewrite','revision_conflict','invalid_cursor','operation_retired','device_limit','role_identity_conflict','invalid_expression_prompt',
         'sse_session_not_found','sse_session_limit','sse_queue_full','schedule_not_found','contact_not_found','oauth_limit','call_context_not_found']);
@@ -49,6 +50,7 @@ export function createSupabaseStore(config, fetcher = fetch) {
     wakeCommand: (action, owner = null, payload = {}) => rpc('tincall_wake_bridge', {p_action:action,p_owner:owner,p_payload:payload}),
     mcpCommand: (owner, contact, action, payload = {}, {signal} = {}) => rpc('tincall_mcp', {p_action:action, p_owner:owner, p_contact:contact, p_payload:payload}, signal),
     recentCalls: (owner, contact, limit) => rpc('tincall_recent_calls', {p_owner: owner, p_contact: contact, p_limit: limit}),
+    recordSummaries: (owner, ids = null) => rpc('tincall_record_summaries', {p_owner: owner, p_ids: ids}),
     command: async (owner, action, payload, {signal} = {}) => {
       const imageCommand = (action === 'call.input' && payload.images?.length) || (action === 'record.delete' && !payload.preserve_call_media);
       const value = await rpc(['schedule.put','schedule.enabled'].includes(action) ? 'tincall_schedule_command' : imageCommand ? 'tincall_image_command' : 'tincall_command', {p_action: action, p_payload: payload, p_owner: owner}, signal);

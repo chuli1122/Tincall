@@ -92,7 +92,7 @@ struct CloudSyncScreen: View {
     }
 
     private func deploymentGuide(existing: Bool = false) -> some View {
-        CloudDeploymentGuide(connectExisting: existing, nextSteps: {
+        CloudDeploymentGuide(connectExisting: existing, savedConnections: configuration.connections, nextSteps: {
             cloudFeatures.syncLink
             cloudFeatures.incomingLink
         }) { profile, token in
