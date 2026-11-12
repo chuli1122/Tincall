@@ -26,7 +26,8 @@ extension CallCoordinator {
                 if pendingAudio[callID]?.isEmpty != false, pendingFinalInputs[callID]?.isEmpty != false { savingCallIDs.remove(callID) }
             } catch {
                 savingCallIDs.insert(callID)
-                if record?.id == callID { errorMessage = String(localized: "录音保存未完成，源文件已保留：\(safeMessage(error))") }
+                lastSavingFailure = String(localized: "录音保存未完成，源文件已保留：\(safeMessage(error))")
+                if record?.id == callID { errorMessage = lastSavingFailure }
             }
         }
         hasUnsavedAudio = pendingAudio.values.contains { !$0.isEmpty }
@@ -153,6 +154,7 @@ extension CallCoordinator {
 
     func reportSavingFailure(_ error: Error, callID: UUID) {
         savingCallIDs.insert(callID)
-        if record?.id == callID { errorMessage = String(localized: "记录未保存，请重试：\(safeMessage(error))") }
+        lastSavingFailure = String(localized: "记录未保存，请重试：\(safeMessage(error))")
+        if record?.id == callID { errorMessage = lastSavingFailure }
     }
 }

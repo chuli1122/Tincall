@@ -524,31 +524,19 @@ final class SpeechPlayback {
             try await requestLog.errorBody(bytes)
             throw TincallError(message: String(localized: "MiniMax 合成失败（HTTP \(response.statusCode)）"))
         }
-        var parser = MiniMaxAudioStream()
-        var line = Data()
-        // Byte parsing keeps both SSE lines and JSON error bodies bounded.
-        for try await byte in bytes {
-            try Task.checkCancellation()
-            guard generation == expectedGeneration else { throw CancellationError() }
-            if byte == 10 {
-                do {
-                    if let data = try parser.consume(line: String(decoding: line, as: UTF8.self)), !data.isEmpty {
-                        try accept(data, for: segment, index: index, generation: expectedGeneration)
-                    }
-                } catch { captureMiniMaxError(line, log: requestLog); throw error }
-                line.removeAll(keepingCapacity: true)
-            } else {
-                guard line.count < 2 * 1024 * 1024 else { throw TincallError(message: String(localized: "MiniMax 音频响应过大")) }
-                line.append(byte)
-            }
-        }
+        let (pcm, continuation) = AsyncThrowingStream<Data, any Error>.makeStream()
+        let reader = Task.detached { await Self.readMiniMaxPCM(bytes, into: continuation) }
+        defer { reader.cancel() }
         do {
-            if !line.isEmpty, let data = try parser.consume(line: String(decoding: line, as: UTF8.self)), !data.isEmpty {
+            for try await data in pcm {
+                try Task.checkCancellation()
+                guard generation == expectedGeneration else { throw CancellationError() }
                 try accept(data, for: segment, index: index, generation: expectedGeneration)
             }
-        } catch { captureMiniMaxError(line, log: requestLog); throw error }
+        } catch let failure as MiniMaxLineFailure {
+            captureMiniMaxError(failure.line, log: requestLog); throw failure.error
+        }
         try Task.checkCancellation()
-        try parser.finish()
         guard segment.firstAudio, segment.pcm.count.isMultiple(of: 2) else {
             throw TincallError(message: String(localized: "MiniMax 返回了空音频或不完整的 PCM"))
         }
@@ -557,6 +545,37 @@ final class SpeechPlayback {
     private func audioResult(_ segment: SpeechPlaybackSegment, subtracting initialBytes: Int = 0) -> String {
         let bytes = max(0, segment.receivedBytes - initialBytes)
         return String(format: String(localized: "音频 %.2f 秒 · %d 字节"), Double(bytes) / 48000, bytes)
+    }
+
+    private struct MiniMaxLineFailure: Error { let line: Data; let error: any Error }
+
+    /// MiniMax sends hex PCM inside large JSON lines. Parsing them byte by byte on the
+    /// main actor delayed buffer refills and made live playback crackle, so read here.
+    nonisolated private static func readMiniMaxPCM(_ bytes: URLSession.AsyncBytes,
+                                                   into continuation: AsyncThrowingStream<Data, any Error>.Continuation) async {
+        var parser = MiniMaxAudioStream()
+        var line = Data()
+        func consumeLine() throws {
+            do {
+                if let data = try parser.consume(line: String(decoding: line, as: UTF8.self)), !data.isEmpty {
+                    continuation.yield(data)
+                }
+            } catch { throw MiniMaxLineFailure(line: line, error: error) }
+            line.removeAll(keepingCapacity: true)
+        }
+        do {
+            // Byte parsing keeps both SSE lines and JSON error bodies bounded.
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                if byte == 10 { try consumeLine(); continue }
+                guard line.count < 2 * 1024 * 1024 else { throw TincallError(message: String(localized: "MiniMax 音频响应过大")) }
+                line.append(byte)
+            }
+            if !line.isEmpty { try consumeLine() }
+            try Task.checkCancellation()
+            try parser.finish()
+            continuation.finish()
+        } catch { continuation.finish(throwing: error) }
     }
 
     private func captureMiniMaxError(_ line: Data, log: RequestLogSpan) {
@@ -617,7 +636,8 @@ final class SpeechPlayback {
                 segment.started = true
                 log("play_start", index: playingIndex)
             }
-            while segment.scheduled < 3, segment.pcm.count >= 2 {
+            // About half a second ahead, so a busy main actor does not leave the player empty.
+            while segment.scheduled < 6, segment.pcm.count >= 2 {
                 let count = min(4096, segment.pcm.count / 2 * 2)
                 let data = Data(segment.pcm.prefix(count))
                 segment.pcm.removeFirst(count)

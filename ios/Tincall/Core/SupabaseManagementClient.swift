@@ -41,18 +41,30 @@ final class SupabaseManagementClient {
         return try await management("\(ref)/database/query", pat: pat, body: body)
     }
 
-    func registerOfficialPush(token: String) async throws {
+    /// The user's deployment relays enrollment: phones on some networks cannot
+    /// reach the official push host, while they already reach their Supabase.
+    func registerOfficialPush(ref: String, token: String) async throws {
+        var request = URLRequest(url: URL(string: "https://\(ref).supabase.co/functions/v1/tincall/push/register")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data("{}".utf8)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
+        struct Registration: Decodable { let registered: Bool }
         do {
-            let data = try await send(Self.officialPushURL.appendingPathComponent("services/register"),
-                                      headers: ["Authorization": "Bearer \(token)"], body: [String: String]())
-            struct Registration: Decodable { let registered: Bool }
-            guard try Self.decode(Registration.self, data).registered else {
-                throw TincallError(message: String(localized: "官方推送服务未确认开通。"))
+            for attempt in 1...5 {
+                let (data, response) = try await session.data(for: request)
+                try Task.checkCancellation()
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                // A function deployed, or a credential written, moments earlier can still be
+                // served by the previous version or environment.
+                if [403, 404].contains(status), attempt < 5 { try await Task.sleep(for: .seconds(2)); continue }
+                guard (200..<300).contains(status), try Self.decode(Registration.self, data).registered else { break }
+                return
             }
         } catch is CancellationError { throw CancellationError() }
-        catch {
-            throw TincallError(message: String(localized: "官方来电推送尚未开通。云端配置已保留，请稍后重试部署，会继续完成开通。"))
-        }
+        catch {}
+        throw TincallError(message: String(localized: "官方来电推送尚未开通。云端配置已保留，请稍后重试部署，会继续完成开通。"))
     }
 
     func verifyConfiguredOfficialPush(ref: String, token: String) async throws -> Bool {

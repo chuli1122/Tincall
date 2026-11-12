@@ -60,7 +60,7 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
             let (status, value, timeout) = try Self.fixture.lock.withLock { () throws -> (Int, Any, Bool) in
                 let f = Self.fixture
                 let url = request.url!
-                precondition(["api.supabase.com", "\(testRef).supabase.co", "tincall-push.tincall-app.workers.dev"].contains(url.host!))
+                precondition(["api.supabase.com", "\(testRef).supabase.co"].contains(url.host!), "the phone must not call the official push host")
                 let path = url.path
                 var operation = path
                 var result: Any = [:]
@@ -163,8 +163,9 @@ private final class DeploymentProtocol: URLProtocol, @unchecked Sendable {
                     precondition(payload["email"] as? String == testEmail && payload["email_confirm"] as? Bool == true)
                     if f.failure != operation { f.owner = testOwner; f.ownerCreates += 1 }
                     result = ["id": testOwner.uuidString, "email": testEmail]
-                } else if url.host == "tincall-push.tincall-app.workers.dev" {
-                    precondition(path == "/services/register" && request.httpMethod == "POST")
+                } else if path == "/functions/v1/tincall/push/register" {
+                    // Enrollment is relayed by the user's deployment; the phone never calls the push host.
+                    precondition(request.httpMethod == "POST")
                     precondition(f.pushURL == "https://tincall-push.tincall-app.workers.dev")
                     precondition(f.pushToken?.hasPrefix("tcpush_\(testRef)_") == true)
                     precondition(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(f.pushToken!)")

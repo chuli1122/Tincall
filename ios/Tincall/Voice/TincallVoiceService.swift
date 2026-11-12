@@ -35,6 +35,8 @@ final class TincallVoiceService: VoiceService {
     private var bluetoothRefreshTask: Task<Void, Never>?
     private var bluetoothRepairFailed = false
     private var pendingAutomaticOutput = false
+    private var pendingNewDevice = false
+    private var speakerReplacedHeadset = false
     private var textInputActive = false
     private var audioInterrupted = false
     private var interruptionObserver: NSObjectProtocol?
@@ -192,7 +194,16 @@ final class TincallVoiceService: VoiceService {
         guard let identity = session else { throw TincallError(message: String(localized: "通话尚未连接")) }
         beginOutputChange()
         defer { endOutputChange(session: identity) }
-        let result = try await audioRouting.setSpeakerEnabled(enabled, session: identity)
+        if enabled, speakerOverride != true {
+            speakerReplacedHeadset = AVAudioSession.sharedInstance().currentRoute.outputs.contains {
+                $0.portType != .builtInSpeaker && $0.portType != .builtInReceiver
+            }
+        }
+        // Turning the speaker off hands output back to that headset, which the
+        // VoiceChat mode held by voice processing would refuse.
+        let released = !enabled && speakerReplacedHeadset ? await MicrophoneCapture.releaseVoiceProcessing() : false
+        guard session == identity else { throw CancellationError() }
+        let result = try await audioRouting.setSpeakerEnabled(enabled, restoreMediaMode: released, session: identity)
         guard session == identity else { throw CancellationError() }
         let categoryTime = result.categoryMilliseconds.map(String.init) ?? "unfinished"
         let outputTime = result.outputMilliseconds.map(String.init) ?? "unfinished"
@@ -204,6 +215,7 @@ final class TincallVoiceService: VoiceService {
             throw TincallError(message: String(localized: "无法切换扬声器（错误码：\(String(code))）"))
         }
         speakerOverride = enabled
+        if enabled { MicrophoneCapture.requestEchoCheck() } else { speakerReplacedHeadset = false }
         reportSpeakerState()
     }
 
@@ -418,7 +430,7 @@ final class TincallVoiceService: VoiceService {
         speakerOverride = nil
         bluetoothRefreshTask?.cancel(); bluetoothRefreshTask = nil
         bluetoothRepairFailed = false
-        pendingAutomaticOutput = false
+        pendingAutomaticOutput = false; pendingNewDevice = false; speakerReplacedHeadset = false
         outputChangesInFlight = 0
         duckingRevision = 0
         replyPlaybackStarted = false
@@ -688,14 +700,17 @@ final class TincallVoiceService: VoiceService {
         }
     }
 
-    private func refreshBluetooth(preferAutomatic: Bool, session identity: VoiceSessionID) {
+    private func refreshBluetooth(preferAutomatic: Bool, newDevice: Bool = false, session identity: VoiceSessionID) {
         if preferAutomatic { pendingAutomaticOutput = true }
+        if newDevice { pendingNewDevice = true }
         guard bluetoothRefreshTask == nil else { return }
         bluetoothRefreshTask = Task { [weak self] in
             guard let self, self.session == identity, !Task.isCancelled else { return }
             self.beginOutputChange()
             let automatic = self.pendingAutomaticOutput
+            let newDevice = self.pendingNewDevice
             self.pendingAutomaticOutput = false
+            self.pendingNewDevice = false
             defer {
                 if self.session == identity {
                     self.bluetoothRefreshTask = nil
@@ -705,7 +720,11 @@ final class TincallVoiceService: VoiceService {
             }
             do {
                 guard !self.audioInterrupted else { return }
-                let available = try await self.audioRouting.refreshBluetooth(preferAutomatic: automatic, session: identity)
+                // Capture refresh is held by beginOutputChange until the new mode is in place.
+                let released = newDevice ? await MicrophoneCapture.releaseVoiceProcessing() : false
+                guard self.session == identity, !Task.isCancelled else { return }
+                let available = try await self.audioRouting.refreshBluetooth(preferAutomatic: automatic,
+                    restoreMediaMode: released, session: identity)
                 guard self.session == identity, !Task.isCancelled else { return }
                 self.bluetoothRepairFailed = !available
                 if automatic { self.speakerOverride = nil }
@@ -766,10 +785,13 @@ final class TincallVoiceService: VoiceService {
                 let needsAudioRepair = !audio.categoryOptions.contains([.allowBluetoothA2DP, .mixWithOthers]) ||
                     audio.categoryOptions.contains(.duckOthers) != self.shouldDuckOtherAudio
                 if !self.audioInterrupted && (preferAutomatic || (needsAudioRepair && !self.bluetoothRepairFailed)) {
-                    self.refreshBluetooth(preferAutomatic: preferAutomatic, session: session)
+                    self.refreshBluetooth(preferAutomatic: preferAutomatic, newDevice: newDevice, session: session)
                 }
                 self.updateRecognitionPolicy()
                 self.reportSpeakerState()
+                if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, !self.audioInterrupted {
+                    await MicrophoneCapture.refreshAfterOutputRemoved()
+                }
             }
         }
     }

@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "zh-Hans",
   "strings" : {
+    "仍有内容未保存：%lld 段录音、%lld 条文字。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Still not saved: %1$lld recording clips and %2$lld text inputs."
+          }
+        }
+      }
+    },
     "也可左右滑动通话内容切换" : {
       "localizations" : {
         "en" : {
@@ -1315,7 +1325,14 @@
 
     },
     "Agent辅助接入" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent-Assisted Setup"
+          }
+        }
+      }
     },
     "对话内容由你配置的 AI 模型或外部服务生成，不代表 Tincall 或开发者的观点。AI 回复、转写和摘要可能不准确、不完整或产生误导。请核实重要信息，不将其作为医疗、法律、财务等专业意见，也不要依赖 Tincall 处理紧急求助。" : {
       "localizations" : {
@@ -1627,13 +1644,34 @@
 
     },
     "ChatGPT 可以查看这位联系人的通话文字、发送回复及发起或结束通话。它不能访问其他联系人或云端备份。仅确认你刚刚在 ChatGPT 发起的授权。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatGPT can view this contact’s call text, send replies, and start or end calls. It cannot access other contacts or cloud backups. Only confirm an authorization you just started in ChatGPT."
+          }
+        }
+      }
     },
     "ChatGPT 授权" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ChatGPT Authorization"
+          }
+        }
+      }
     },
     "ChatGPT 请选择 OAuth；在授权页取得一次性授权码后，前往此云端连接的「ChatGPT 授权」确认联系人。其他支持请求头的平台可直接填写上面的 Authorization。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "For ChatGPT, choose OAuth. After getting the one-time code on the authorization page, confirm the contact under “ChatGPT Authorization” for this cloud connection. Other platforms that support request headers can use the Authorization above directly."
+          }
+        }
+      }
     },
     "Contact" : {
 
@@ -1968,7 +2006,14 @@
       }
     },
     "Kelivo 的 MCP 请求超时默认 30 秒。请在 Kelivo 的 MCP 设置中调至 180 秒，再重新连接 Tincall。其他平台也需让请求超时长于 120 秒。\n\nTincall 的回复工具发送完整文字后，会继续等你下一句话；朗读和等待都占用这次请求的时间。Request timed out: tools/call 表示客户端没等到结果，不代表回复没发送，不要因此直接重发正文。\n\n服务端一次最多等待 120 秒，超时后 AI 调用 tincall_wait 继续，整通电话不会因此结束。你还在说话时应继续等待完整转写；播放停止不会提前结束等待。若 wait 返回「播放已打断」，请用新版 App 更新云端服务。\n\n更新云端后，在 AI 平台刷新 Tincall 工具列表或断开后重连。新版回复只要求 text；挂断前的告别可设置 wait_for_input:false，再调用 tincall_end。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kelivo’s default MCP request timeout is 30 seconds. Change it to 180 seconds in Kelivo’s MCP settings, then reconnect Tincall. Other platforms also need a request timeout longer than 120 seconds.\n\nAfter sending the full reply, Tincall’s reply tool keeps waiting for your next message; speech playback and waiting both count toward this request. “Request timed out: tools/call” means the client did not receive the result; it does not mean the reply was not sent. Do not resend the text because of it.\n\nThe server waits at most 120 seconds at a time. After a timeout, the AI calls tincall_wait to continue, and the call does not end. While you are still speaking, it keeps waiting for the full transcript; playback stopping does not end the wait early. If wait returns “playback interrupted”, update the cloud service with the new version of the app.\n\nAfter updating the cloud, refresh the Tincall tool list on the AI platform or disconnect and reconnect. The new reply tool only requires text; for a farewell before hanging up, set wait_for_input:false, then call tincall_end."
+          }
+        }
+      }
     },
     "LAME" : {
 
@@ -2064,7 +2109,14 @@
       }
     },
     "MCP 很快超时，或反复调用工具怎么办？" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What if MCP times out quickly or keeps calling tools?"
+          }
+        }
+      }
     },
     "MCP 接入" : {
       "extractionState" : "stale",
@@ -2942,7 +2994,14 @@
       }
     },
     "一次性授权码" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "One-Time Code"
+          }
+        }
+      }
     },
     "一次购买，永久解锁核心通话功能，无订阅。模型、语音和个人云端服务需使用自己的账号和配置，相关费用由对应服务商另行收取。" : {
       "localizations" : {
@@ -3037,7 +3096,14 @@
       }
     },
     "上传本机已有录音" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upload Existing Local Recordings"
+          }
+        }
+      }
     },
     "上传通话备份 1 条" : {
       "localizations" : {
@@ -3141,10 +3207,24 @@
       }
     },
     "下载云端内容" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Cloud Content"
+          }
+        }
+      }
     },
     "下载内容与已备份录音" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Download Content and Backed-Up Recordings"
+          }
+        }
+      }
     },
     "下载图片期间本机记录已改变，请刷新后再恢复" : {
       "localizations" : {
@@ -3463,7 +3543,14 @@
       }
     },
     "云端" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud"
+          }
+        }
+      }
     },
     "云端不再按这条计划发起来电，已有通话记录会保留。" : {
       "localizations" : {
@@ -3648,19 +3735,54 @@
       }
     },
     "云端尚未支持 OAuth，请先用此版本 App 更新一键部署。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud does not support OAuth yet. Update your one-tap deployment with this version of the app first."
+          }
+        }
+      }
     },
     "云端尚未支持联系人模式同步，请先在「部署或更新服务」更新后重试。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud does not support syncing contact modes yet. Update it under Deploy or Update a Service, then try again."
+          }
+        }
+      }
     },
     "云端尚未确认联系人模式，设置未保存。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud has not confirmed the contact mode. The setting was not saved."
+          }
+        }
+      }
     },
     "云端尚未确认通话结束。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud has not confirmed that the call ended."
+          }
+        }
+      }
     },
     "云端已删除" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleted from Cloud"
+          }
+        }
+      }
     },
     "云端已删除 · 本机副本保留" : {
       "extractionState" : "stale",
@@ -3674,7 +3796,14 @@
       }
     },
     "云端已删除，本机副本保留" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleted from cloud; local copy kept"
+          }
+        }
+      }
     },
     "云端录音下载不完整，未导入" : {
       "localizations" : {
@@ -3717,7 +3846,14 @@
       }
     },
     "云端数据归属存在多个用户，无法安全继续部署。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud data belongs to more than one user, so deployment cannot safely continue."
+          }
+        }
+      }
     },
     "云端文字已删除，媒体清理未完成。请继续上次操作。" : {
       "localizations" : {
@@ -3730,10 +3866,24 @@
       }
     },
     "云端更新" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud Updated"
+          }
+        }
+      }
     },
     "云端未保存所选的重复方式或启用状态，请按原部署方式更新云端服务后重试。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud did not save the selected repeat option or on/off state. Update the cloud service the same way you deployed it, then try again."
+          }
+        }
+      }
     },
     "云端未确认保存录音" : {
       "localizations" : {
@@ -3766,7 +3916,14 @@
       }
     },
     "云端未返回有效的授权结果。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud did not return a valid authorization result."
+          }
+        }
+      }
     },
     "云端未返回来电事件流，请更新 Tincall 云端服务。" : {
       "localizations" : {
@@ -3799,7 +3956,14 @@
       }
     },
     "云端正在同步，稍后再保存连接修改。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cloud is syncing. Save connection changes later."
+          }
+        }
+      }
     },
     "云端消息图片引用不完整，未改动本机记录" : {
       "localizations" : {
@@ -4077,7 +4241,14 @@
       }
     },
     "仅供查看和复制，不可修改" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View and copy only; cannot be edited"
+          }
+        }
+      }
     },
     "仅存本机 · 最近 7 天" : {
       "localizations" : {
@@ -4101,7 +4272,14 @@
       }
     },
     "仅显示已授权的联系人。选定后可同步姓名和头像，并使用其号码或邮箱匹配系统来电。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only contacts you have allowed access to are shown. Once selected, the name and photo can sync, and the contact’s numbers or email addresses can match system calls."
+          }
+        }
+      }
     },
     "仅显示有姓名且允许 Tincall 访问的联系人。选定后可同步姓名和头像。" : {
       "extractionState" : "stale",
@@ -4260,7 +4438,14 @@
       }
     },
     "传输方式" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transport"
+          }
+        }
+      }
     },
     "低 · low" : {
       "localizations" : {
@@ -4453,7 +4638,14 @@
       }
     },
     "使用的云端" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud in Use"
+          }
+        }
+      }
     },
     "例如：zh-CN" : {
       "localizations" : {
@@ -4753,7 +4945,14 @@
       }
     },
     "修正上方提示后点「重试部署或更新」，会接着上次继续，不会覆盖已有数据。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fix the issue above, then tap “Retry Deployment or Update”. It continues from where it stopped and does not overwrite existing data."
+          }
+        }
+      }
     },
     "修正上方提示后点「重试部署或更新」。已经完成的步骤会继续使用，不会从头覆盖数据。" : {
       "extractionState" : "stale",
@@ -4838,7 +5037,14 @@
       }
     },
     "允许访问的联系人" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allowed Contacts"
+          }
+        }
+      }
     },
     "允许说话打断" : {
       "localizations" : {
@@ -5396,7 +5602,14 @@
       }
     },
     "共 %lld 通" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld calls"
+          }
+        }
+      }
     },
     "共用 MCP 地址" : {
       "extractionState" : "stale",
@@ -6039,10 +6252,24 @@
       }
     },
     "删除此来电计划？" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete this call schedule?"
+          }
+        }
+      }
     },
     "删除此计划" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete Schedule"
+          }
+        }
+      }
     },
     "删除联系人" : {
       "localizations" : {
@@ -6105,10 +6332,24 @@
       }
     },
     "刷新云端记录" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Cloud Records"
+          }
+        }
+      }
     },
     "刷新只读取云端列表。「立即同步」会上传和下载通话内容，即使自动同步已关闭也可使用。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh only reads the cloud list. “Sync Now” uploads and downloads call content and works even when automatic sync is off."
+          }
+        }
+      }
     },
     "刷新后端联系人" : {
       "localizations" : {
@@ -6142,7 +6383,14 @@
       }
     },
     "刷新通话状态" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Call Status"
+          }
+        }
+      }
     },
     "前往反馈" : {
       "localizations" : {
@@ -6258,7 +6506,14 @@
       }
     },
     "原 MCP 连接已更改，请恢复原连接后再切换模式。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The original MCP connection has changed. Restore it before switching modes."
+          }
+        }
+      }
     },
     "原关联已不在服务列表中，请重新选择。" : {
       "extractionState" : "stale",
@@ -6332,7 +6587,14 @@
       }
     },
     "原连接不可用，设备解绑待重试" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Original connection unavailable; device unbinding will be retried"
+          }
+        }
+      }
     },
     "原通话已结束，请重新运行快捷指令" : {
       "localizations" : {
@@ -6450,7 +6712,14 @@
       }
     },
     "另有 %lld 通正在通话或处理待办，暂未同步。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld more calls are in progress or have pending work and were not synced yet."
+          }
+        }
+      }
     },
     "只在本机展示，不发起模型请求，也不显示凭据。" : {
       "localizations" : {
@@ -6626,7 +6895,14 @@
       }
     },
     "同意授权" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approve"
+          }
+        }
+      }
     },
     "同时下载云端已备份录音，可能产生流量费用。" : {
       "extractionState" : "manual",
@@ -6693,7 +6969,14 @@
       }
     },
     "同步文字、图片和摘要：本机更新上传到云端，云端更新下载到本机。开启后在打开 App、回到前台或通话保存后自动同步；通话期间暂停。联系人与设置保留在本机。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Syncs text, images, and summaries: local changes upload to the cloud, and cloud changes download to this iPhone. When on, it syncs automatically when you open the app, return to it, or a call is saved, and pauses during calls. Contacts and settings stay on this iPhone."
+          }
+        }
+      }
     },
     "同步文字与摘要" : {
       "extractionState" : "stale",
@@ -6862,7 +7145,14 @@
       }
     },
     "后台通话卡片尚未完成推送绑定，请更新云端服务" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The background call card has not finished push binding. Update the cloud service."
+          }
+        }
+      }
     },
     "后端" : {
       "localizations" : {
@@ -6875,7 +7165,14 @@
       }
     },
     "后端取消生成失败" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The backend failed to cancel generation"
+          }
+        }
+      }
     },
     "后端未提供原关联的联系人，请重新选择。" : {
       "localizations" : {
@@ -6929,7 +7226,14 @@
       }
     },
     "启用计划" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Schedule"
+          }
+        }
+      }
     },
     "和 TA 的这通电话" : {
       "localizations" : {
@@ -7106,7 +7410,14 @@
       }
     },
     "在 ChatGPT 添加 MCP 服务时选择 OAuth，将授权页显示的一次性授权码填在这里。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When adding the MCP service in ChatGPT, choose OAuth and enter the one-time code shown on the authorization page here."
+          }
+        }
+      }
     },
     "在 Supabase 打开或创建项目。\n更新服务时，请使用此前在这台手机部署的原项目。" : {
       "localizations" : {
@@ -7224,7 +7535,14 @@
       }
     },
     "在本机与自己的云端之间同步通话记录" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync call records between this iPhone and your own cloud"
+          }
+        }
+      }
     },
     "在电脑或服务器完成部署后，将得到的服务地址和手机访问令牌填入下方。" : {
       "localizations" : {
@@ -7617,7 +7935,14 @@
       }
     },
     "处理 ChatGPT 授权" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Handle ChatGPT Authorization"
+          }
+        }
+      }
     },
     "备份与恢复" : {
       "extractionState" : "stale",
@@ -7815,7 +8140,14 @@
       }
     },
     "复制 Authorization" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Authorization"
+          }
+        }
+      }
     },
     "复制 MCP 地址" : {
       "localizations" : {
@@ -7839,7 +8171,14 @@
       }
     },
     "复制 URL" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy URL"
+          }
+        }
+      }
     },
     "复制%@" : {
       "localizations" : {
@@ -7965,7 +8304,14 @@
       }
     },
     "复制访问令牌" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy Access Token"
+          }
+        }
+      }
     },
     "复制说明" : {
       "localizations" : {
@@ -8173,7 +8519,14 @@
       }
     },
     "如果其他设备正在使用这通通话，也会被挂断。仅在确认它已不再使用时操作。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If another device is using this call, it will also be hung up. Only do this when you are sure it is no longer in use."
+          }
+        }
+      }
     },
     "姓名" : {
       "localizations" : {
@@ -9091,7 +9444,14 @@
       }
     },
     "已保存录音" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved Recordings"
+          }
+        }
+      }
     },
     "已保存的关联" : {
       "extractionState" : "stale",
@@ -9239,7 +9599,14 @@
       }
     },
     "已复制 Authorization" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authorization copied"
+          }
+        }
+      }
     },
     "已复制 MCP 地址" : {
       "extractionState" : "stale",
@@ -9264,7 +9631,14 @@
       }
     },
     "已复制 URL" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "URL copied"
+          }
+        }
+      }
     },
     "已复制唤醒桥配置" : {
       "extractionState" : "stale",
@@ -9278,7 +9652,14 @@
       }
     },
     "已复制访问令牌" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Access token copied"
+          }
+        }
+      }
     },
     "已安全保存" : {
       "extractionState" : "stale",
@@ -9382,7 +9763,14 @@
       }
     },
     "已拒绝此次授权。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This authorization was denied."
+          }
+        }
+      }
     },
     "已按选择用本机文字更新云端；未上传录音" : {
       "localizations" : {
@@ -9395,7 +9783,14 @@
       }
     },
     "已授权。回到原授权页面刷新，继续连接 ChatGPT。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Authorized. Go back to the original authorization page and refresh to continue connecting ChatGPT."
+          }
+        }
+      }
     },
     "已接收用户消息" : {
       "localizations" : {
@@ -9674,7 +10069,14 @@
       }
     },
     "已连接云端，共 %lld 通记录。尚未上传本机内容。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected to the cloud with %lld records. Local content has not been uploaded yet."
+          }
+        }
+      }
     },
     "已连接的服务" : {
       "extractionState" : "stale",
@@ -9989,7 +10391,14 @@
       }
     },
     "当前安装包未包含推送权限，暂时只能在 App 打开时接听。后台来电还需要支持推送的签名和云端推送服务。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This build has no push entitlement, so calls can only be answered while the app is open. Background calls also need a push-capable signature and a cloud push service."
+          }
+        }
+      }
     },
     "当前安装方式不支持后台来电" : {
       "localizations" : {
@@ -10103,7 +10512,14 @@
       }
     },
     "录音" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recordings"
+          }
+        }
+      }
     },
     "录音保存 · 本地备份 · 云端同步" : {
       "extractionState" : "stale",
@@ -10740,10 +11156,24 @@
       }
     },
     "打开" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open"
+          }
+        }
+      }
     },
     "打开 Supabase" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Supabase"
+          }
+        }
+      }
     },
     "打开 Supabase，创建项目" : {
       "extractionState" : "stale",
@@ -10757,7 +11187,14 @@
       }
     },
     "打开令牌页面" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Token Page"
+          }
+        }
+      }
     },
     "打开分享页面，由你确认添加" : {
       "localizations" : {
@@ -11058,7 +11495,14 @@
       }
     },
     "拒绝" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deny"
+          }
+        }
+      }
     },
     "挂断" : {
       "extractionState" : "stale",
@@ -11226,7 +11670,14 @@
       }
     },
     "授权码已失效或已处理，请在 ChatGPT 重新发起连接。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The code has expired or was already used. Start the connection again in ChatGPT."
+          }
+        }
+      }
     },
     "排列顺序" : {
       "localizations" : {
@@ -11442,7 +11893,14 @@
       }
     },
     "搜索联系人或日期" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search contacts or dates"
+          }
+        }
+      }
     },
     "搜索通话" : {
       "localizations" : {
@@ -12058,7 +12516,14 @@
       }
     },
     "无法切换麦克风，请在 App 内重试" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t switch the microphone. Try again in the app."
+          }
+        }
+      }
     },
     "无法取得可用的项目服务密钥，请检查 API Keys 与 API Key Secrets 读取权限；不会自动创建或启用密钥。" : {
       "localizations" : {
@@ -12131,7 +12596,14 @@
       }
     },
     "无法授权，请检查此连接的手机访问令牌。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t authorize. Check this connection’s phone access token."
+          }
+        }
+      }
     },
     "无法生成 MCP 配置，请重试。" : {
       "extractionState" : "stale",
@@ -12508,7 +12980,14 @@
       }
     },
     "显示后台通话卡片" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show the background call card"
+          }
+        }
+      }
     },
     "显示外观 · 系统语言" : {
       "extractionState" : "stale",
@@ -12624,7 +13103,14 @@
       }
     },
     "暂无计划，可添加独立模式联系人的定时来电。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No schedules yet. You can add scheduled calls for Independent Mode contacts."
+          }
+        }
+      }
     },
     "暂无请求日志" : {
       "localizations" : {
@@ -12657,7 +13143,14 @@
       }
     },
     "暂时无法处理授权，请检查授权码和连接后重试。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t process the authorization right now. Check the code and connection, then try again."
+          }
+        }
+      }
     },
     "暂时无法更新联系人，已保留原资料，请稍后重试。" : {
       "localizations" : {
@@ -12680,7 +13173,14 @@
       }
     },
     "暂时无法读取云端通话，请稍后重试。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t read cloud calls right now. Try again later."
+          }
+        }
+      }
     },
     "暂时无法读取对话对象，请检查服务配置后重试。" : {
       "localizations" : {
@@ -12949,7 +13449,14 @@
       }
     },
     "服务已保存，选择要设置的功能" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Service saved. Choose what to set up"
+          }
+        }
+      }
     },
     "服务已连好。接下来选你要用的功能，不需要每一项都设置。" : {
       "extractionState" : "stale",
@@ -13440,7 +13947,14 @@
       }
     },
     "未能确认通话已结束。可以重试；若通话状态已改变，请先刷新。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn’t confirm that the call ended. You can retry; if the call status has changed, refresh first."
+          }
+        }
+      }
     },
     "未能读取图片，请重试。" : {
       "localizations" : {
@@ -13648,7 +14162,14 @@
       }
     },
     "本机已停止，但后端尚未确认取消生成，请检查后端取消接口。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopped on this iPhone, but the backend has not confirmed canceling generation. Check the backend’s cancel endpoint."
+          }
+        }
+      }
     },
     "本机已停止，连接端取消尚未确认，请恢复连接重试：%@" : {
       "localizations" : {
@@ -13946,7 +14467,14 @@
       }
     },
     "来电时间" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Time"
+          }
+        }
+      }
     },
     "来电服务" : {
       "extractionState" : "stale",
@@ -14064,7 +14592,14 @@
       }
     },
     "来电连接已更改或不存在，请关闭后台来电并完成旧绑定解除后重试" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The incoming-call connection changed or no longer exists. Turn off background calls, finish removing the old binding, then try again"
+          }
+        }
+      }
     },
     "构建号" : {
       "localizations" : {
@@ -14161,7 +14696,14 @@
       }
     },
     "查看接下来怎么用" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "See What to Do Next"
+          }
+        }
+      }
     },
     "查看服务端记录的未结束通话。若手机已挂断但仍提示占线，可在这里检查并结束残留通话；这里有记录不代表手机仍在通话。仅在打开此页或点击刷新时查询。" : {
       "localizations" : {
@@ -14799,6 +15341,12 @@
     },
     "正在同步通话记录：%lld／%lld…" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Syncing call records: %1$lld/%2$lld…"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "new",
@@ -14819,7 +15367,14 @@
       }
     },
     "正在回传尚未上传的通话摘要…" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sending call summaries that have not been uploaded…"
+          }
+        }
+      }
     },
     "正在回复" : {
       "extractionState" : "stale",
@@ -14833,7 +15388,14 @@
       }
     },
     "正在处理…" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Processing…"
+          }
+        }
+      }
     },
     "正在处理图片" : {
       "localizations" : {
@@ -14927,10 +15489,24 @@
       }
     },
     "正在来电" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ringing"
+          }
+        }
+      }
     },
     "正在检查云端记录版本…" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking cloud record version…"
+          }
+        }
+      }
     },
     "正在检查本机识别…" : {
       "localizations" : {
@@ -15135,10 +15711,24 @@
       }
     },
     "正在连接云端，连接成功后可开启录音同步。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting to the cloud. Recording sync can be turned on once connected."
+          }
+        }
+      }
     },
     "正在连接云端…" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting to the cloud…"
+          }
+        }
+      }
     },
     "正在部署…" : {
       "localizations" : {
@@ -15171,7 +15761,14 @@
       }
     },
     "此云端尚未支持新的定时来电设置，请先按原部署方式更新云端服务，再重试。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This cloud does not support the new scheduled call settings yet. Update the cloud service the same way you deployed it, then try again."
+          }
+        }
+      }
     },
     "此令牌仅用于部署或更新，完成后可撤销。" : {
       "extractionState" : "stale",
@@ -15205,7 +15802,14 @@
       }
     },
     "此对象使用 MCP，请在联系人设置中选择有效的后端联系人。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This contact uses MCP. Choose a valid backend contact in the contact settings."
+          }
+        }
+      }
     },
     "此服务不支持自动配置 MCP。请在下方按手动接入说明完成配置。" : {
       "localizations" : {
@@ -15258,7 +15862,14 @@
       }
     },
     "此服务还没有 MCP 联系人，请先在联系人设置中选择 MCP 模式并保存。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This service has no MCP contact yet. Choose MCP mode in the contact settings and save first."
+          }
+        }
+      }
     },
     "此构建未找到组件许可文件，可查看上游项目的许可文本。" : {
       "extractionState" : "stale",
@@ -15564,28 +16175,84 @@
       }
     },
     "每周一" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Monday"
+          }
+        }
+      }
     },
     "每周三" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Wednesday"
+          }
+        }
+      }
     },
     "每周二" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Tuesday"
+          }
+        }
+      }
     },
     "每周五" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Friday"
+          }
+        }
+      }
     },
     "每周六" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Saturday"
+          }
+        }
+      }
     },
     "每周四" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Thursday"
+          }
+        }
+      }
     },
     "每周日" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Sunday"
+          }
+        }
+      }
     },
     "每天" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every Day"
+          }
+        }
+      }
     },
     "每天 %@ · %@" : {
       "extractionState" : "stale",
@@ -15816,7 +16483,14 @@
       }
     },
     "没有进行中的云端通话" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No cloud call in progress"
+          }
+        }
+      }
     },
     "没有进行中的通话" : {
       "localizations" : {
@@ -15869,7 +16543,14 @@
       }
     },
     "消息图片" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Message Images"
+          }
+        }
+      }
     },
     "消息图片不完整或超过 4 张，未发送" : {
       "localizations" : {
@@ -16208,7 +16889,14 @@
       }
     },
     "点下面的入口继续设置，需要哪项就开启哪项。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap an option below to continue setup. Turn on only what you need."
+          }
+        }
+      }
     },
     "点击 Generate new token，选择项目所在的组织，将项目范围限定为当前项目，许可选择「完全访问」。" : {
       "extractionState" : "stale",
@@ -16243,7 +16931,14 @@
       }
     },
     "点右上角 ✓ 保存联系人；重新打开后，可复制 URL 和 Authorization，填入 AI 平台的 MCP 服务设置。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap ✓ in the top-right corner to save the contact. Reopen it to copy the URL and Authorization into the AI platform’s MCP service settings."
+          }
+        }
+      }
     },
     "照片" : {
       "localizations" : {
@@ -16350,7 +17045,14 @@
       }
     },
     "独立模式：Tincall 直接连接模型 API，设定与对话由手机管理。日常通话和本地记录无需部署云端。\n\n普通 MCP：外部平台管理 AI，AI 可发起来电并处理 Tincall 发起的通话；从 Tincall 拨出不会自动唤醒外部 AI。AI 回复后默认每次最多等你的下一句话 2 分钟，没有新消息会提示继续等待，不会挂断通话。\n\nMCP＋唤醒桥：仍使用 MCP 通话，但由接通和每轮新输入的事件触发 AI，AI 回复后结束本轮，下次消息再启动，不必持续等待。新版一键部署包含通用桥；在联系人编辑页选择该模式并复制配置。平台须支持 SSE 订阅和任务启动，或运行相应适配程序。普通 MCP 设置不能代替这部分接入。\n\n后端直连：已有聊天后端直接实现 Tincall 通话接口，由它管理设定、上下文和每轮生成，无需 MCP。也可通过一键部署的服务转发到真正的生成与取消接口。\n\n四种方式的识别与朗读均由 Tincall 处理。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Independent Mode: Tincall connects to the model API directly, and the phone manages the persona and conversations. Everyday calls and local records need no cloud deployment.\n\nOrdinary MCP: an external platform manages the AI. The AI can call you and handle calls you start in Tincall, but calling from Tincall does not wake the external AI automatically. After replying, the AI waits up to 2 minutes for your next message by default; if nothing arrives it is told to keep waiting, and the call does not hang up.\n\nMCP + wake bridge: calls still use MCP, but answering and each new input trigger the AI. It finishes its turn after replying and starts again on the next message, so it does not need to keep waiting. New one-tap deployments include a general bridge; choose this mode in the contact editor and copy the configuration. The platform must support SSE subscriptions and starting tasks, or run a matching adapter. Ordinary MCP settings cannot replace this setup.\n\nDirect Backend: an existing chat backend implements Tincall’s call API directly and manages the persona, context, and each turn’s generation, without MCP. A one-tap deployed service can also forward to the real generation and cancel endpoints.\n\nIn all four modes, Tincall handles speech recognition and reading aloud."
+          }
+        }
+      }
     },
     "独立模式：到「API设置」测试所选预设，核对模型名称、服务地址、账户额度，以及模型是否支持当前参数或图片输入。\n\n后端或 MCP：先检查已保存的服务连接。普通 MCP 需允许工具调用，并让 AI 等待通话输入；只复制 MCP 配置不会自动启动 AI。使用 MCP＋唤醒桥时，在已保存服务中复制桥接配置，确认平台接入端保持事件订阅并能启动 AI 任务；生成与取消接口属于后端接法，不是唤醒订阅。\n\n在「请求日志」中选择聊天模型或连接请求，查看状态和错误码；连接检查通过不等于模型、备份和来电功能都已可用。" : {
       "extractionState" : "stale",
@@ -16364,7 +17066,14 @@
       }
     },
     "独立模式：到「API设置」测试所选预设，核对模型名称、服务地址、账户额度，以及模型是否支持当前参数或图片输入。\n\n后端或 MCP：先检查已保存的服务连接。普通 MCP 需允许工具调用，并让 AI 等待通话输入；只复制 MCP 配置不会自动启动 AI。使用 MCP＋唤醒桥时，确认联系人页已复制桥接配置，且 Agent 或接入程序保持事件订阅并能启动 AI 任务；生成与取消接口属于后端接法，不是唤醒订阅。\n\n在「请求日志」中选择聊天模型或连接请求，查看状态和错误码；连接检查通过不等于模型、备份和来电功能都已可用。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Independent Mode: Test the selected preset in API Settings. Check the model name, service URL, account quota, and whether the model supports the current parameters or image input.\n\nBackend or MCP: Check the saved service connection first. Ordinary MCP must allow tool calls and have the AI wait for call input; copying the MCP configuration alone does not start the AI. With MCP + wake bridge, make sure the bridge configuration was copied from the contact screen and that the agent or adapter keeps its event subscription and can start AI tasks. Generation and cancel endpoints belong to the backend integration, not the wake subscription.\n\nSelect the chat model or connection request in Request Logs to see its status and error code. A successful connection check does not mean the model, backups, and incoming calls all work."
+          }
+        }
+      }
     },
     "独立模式：到「API设置」测试所选预设，核对模型名称、服务地址、账户额度，以及模型是否支持当前参数或图片输入。\n后端或 MCP：先检查已保存的服务连接。MCP 平台还需允许工具调用，并让对应 AI 进入等待通话输入的流程；只复制 MCP 配置不会自动启动 AI。需要自动启动时，平台必须提供生成与取消接口，并另行配置唤醒桥。\n在「请求日志」中选择聊天模型或连接请求，查看状态和错误码；连接检查通过不等于模型、备份和来电功能都已可用。" : {
       "extractionState" : "stale",
@@ -16444,7 +17153,14 @@
       }
     },
     "独立模式联系人的定时来电" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scheduled calls for Independent Mode contacts"
+          }
+        }
+      }
     },
     "独立模式通话不需要部署云端。如果要备份通话、接入 MCP 平台或设置主动来电，先按下面的步骤准备项目。部署只建立服务，各项功能完成后再分别配置。" : {
       "extractionState" : "stale",
@@ -16659,7 +17375,14 @@
       }
     },
     "用本机内容更新云端" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update Cloud with Local Content"
+          }
+        }
+      }
     },
     "用本机文字更新云端？" : {
       "localizations" : {
@@ -17332,7 +18055,14 @@
       }
     },
     "管理副本" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage Copies"
+          }
+        }
+      }
     },
     "管理可访问的联系人" : {
       "localizations" : {
@@ -17378,7 +18108,14 @@
       }
     },
     "管理这通电话的云端副本" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage this call’s cloud copy"
+          }
+        }
+      }
     },
     "管理通话备份、主动来电与定时计划。" : {
       "extractionState" : "stale",
@@ -17525,7 +18262,14 @@
       }
     },
     "系统未激活来电音频，请重新拨号" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The system did not activate call audio. Please call again"
+          }
+        }
+      }
     },
     "系统来电操作失败（%lld）" : {
       "localizations" : {
@@ -17558,7 +18302,14 @@
       }
     },
     "系统来电横幅的头像由系统联系人提供；未关联系统联系人时，不会显示这里设置的头像。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The avatar on the system call banner comes from the system contact. Without a linked system contact, the avatar set here is not shown."
+          }
+        }
+      }
     },
     "系统联系人头像" : {
       "localizations" : {
@@ -17674,10 +18425,24 @@
       }
     },
     "结束这通云端通话" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End This Cloud Call"
+          }
+        }
+      }
     },
     "结束这通云端通话？" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End this cloud call?"
+          }
+        }
+      }
     },
     "结束通话" : {
       "localizations" : {
@@ -17964,7 +18729,14 @@
       }
     },
     "聊天模型与摘要模型在「API设置」管理；声音 ID、合成模型和语音表达提示词在「文字转语音」管理；识别服务在「我的设置」中选择。添加后可被多个联系人复用，不必重复填写。\n\n联系人的名字、头像、通话方式和声音在联系人编辑页设置。独立模式还可选择聊天模型，在「对话设定」填写对方的设定、你的信息、双方关系和对话要求，并选择携带的历史摘要；后端与 MCP 的人物设定、上下文及回复由外部服务管理。\n\n独立模式每轮自动携带语音表达提示词。使用 Tincall 连接端的 MCP 接入时，通话开始时会提供一次朗读要求，AI 平台需保留并遵循。自有后端会在开始通话或接听请求中收到 expression_prompt，是否用于生成需由后端实现。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manage chat and summary models in API Settings; voice IDs, speech models, and voice expression prompts in Text to Speech; and choose the recognition service in My Settings. Once added, they can be reused by multiple contacts without entering them again.\n\nSet a contact’s name, photo, call mode, and voice in the contact editor. Independent Mode also lets you choose a chat model, fill in the other person’s persona, your information, your relationship, and conversation requirements in Conversation Instructions, and choose which past summaries to include. For Backend and MCP, the external service manages persona, context, and replies.\n\nIndependent Mode includes the voice expression prompt with every turn. With MCP through the Tincall connector, speech requirements are provided once at the start of the call, and the AI platform must keep and follow them. A custom backend receives expression_prompt in the start-call or answer request; the backend decides whether to use it in generation."
+          }
+        }
+      }
     },
     "聊天模型与摘要模型在「API设置」管理；声音 ID、合成模型和语音表达提示词在「文字转语音」管理；识别服务在「我的设置」中选择。添加后可被多个联系人复用，不必重复填写。\n\n联系人的名字、头像、通话方式和声音在联系人编辑页设置。独立模式还可选择聊天模型，在「对话设定」填写对方的设定、你的信息、双方关系和对话要求，并选择携带的历史摘要；后端与 MCP 的人物设定、上下文及回复由外部服务管理。\n\n独立模式每轮自动携带语音表达提示词。使用 Tincall 连接端的 MCP 接入时，首次等待结果会返回 voice_instructions，AI 平台需保留并遵循。自有后端会在开始通话或接听请求中收到 expression_prompt，是否用于生成需由后端实现。" : {
       "extractionState" : "stale",
@@ -18104,7 +18876,14 @@
       }
     },
     "联系人模式未同步到云端，设置未保存，请重试。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The contact mode was not synced to the cloud, so the setting was not saved. Try again."
+          }
+        }
+      }
     },
     "联系人登记" : {
       "extractionState" : "manual",
@@ -18149,7 +18928,14 @@
       }
     },
     "自动同步失败，且重试状态未保存：%@" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatic sync failed, and the retry state was not saved: %@"
+          }
+        }
+      }
     },
     "自动同步已完成，录音按此目标的授权同步。待处理冲突：%lld 通。" : {
       "localizations" : {
@@ -18407,7 +19193,14 @@
       }
     },
     "让 Agent 协助你完成 Tincall 接入配置。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let an agent help you set up Tincall."
+          }
+        }
+      }
     },
     "让 AI 平台接入 Tincall，与你通话" : {
       "extractionState" : "stale",
@@ -18576,7 +19369,14 @@
       }
     },
     "记录管理" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Records"
+          }
+        }
+      }
     },
     "许可" : {
       "localizations" : {
@@ -18631,7 +19431,14 @@
       }
     },
     "设备推送标识会分别绑定到已配置的云端及其推送服务，用于向这台 iPhone 发起来电；来电不带聊天正文或录音。请确认这些都是你信任的服务。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The device push identifier is bound to each configured cloud and its push service to place calls to this iPhone; calls carry no chat text or recordings. Make sure these are services you trust."
+          }
+        }
+      }
     },
     "设备推送标识会发到你的云端及其推送服务，用于向这台 iPhone 发起来电；来电不带聊天正文或录音。请确认这是你信任的服务。" : {
       "extractionState" : "stale",
@@ -18688,7 +19495,14 @@
       }
     },
     "访问令牌已保存，由 App 用于连接服务。这里仅供查看和复制；另一台手机连接同一服务时才需要填写。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The access token is saved and used by the app to connect to the service. It is shown here for viewing and copying only; you only need to enter it when connecting another phone to the same service."
+          }
+        }
+      }
     },
     "访问令牌未通过检查，请使用该服务提供的手机令牌。" : {
       "localizations" : {
@@ -19374,7 +20188,14 @@
       }
     },
     "请先在下方刷新云端记录，连接成功后可开启录音同步。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh cloud records below first. Recording sync can be turned on once connected."
+          }
+        }
+      }
     },
     "请先在联系人编辑页选择此服务和 MCP 模式，保存联系人后再来获取配置。" : {
       "localizations" : {
@@ -19387,7 +20208,14 @@
       }
     },
     "请先在联系人设置中配置对话对象" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Set up a conversation partner in the contact settings first"
+          }
+        }
+      }
     },
     "请先在这份连接配置中选择对话对象" : {
       "extractionState" : "stale",
@@ -19451,7 +20279,14 @@
       }
     },
     "请先按原部署方式更新云端服务，再保存新的定时来电设置。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update the cloud service the same way you deployed it before saving the new scheduled call settings."
+          }
+        }
+      }
     },
     "请先更新云端与推送服务，再开启试用版的后台来电" : {
       "localizations" : {
@@ -19494,7 +20329,14 @@
       }
     },
     "请先添加 Tincall 云端连接" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add a Tincall Cloud connection first"
+          }
+        }
+      }
     },
     "请先添加一位独立模式联系人。" : {
       "localizations" : {
@@ -20133,10 +20975,24 @@
       }
     },
     "请粘贴有效的 Supabase Project URL 或项目编号。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Paste a valid Supabase Project URL or project reference."
+          }
+        }
+      }
     },
     "请结束当前通话后再切换联系人模式。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "End the current call before switching contact modes."
+          }
+        }
+      }
     },
     "请结束当前通话后再配置 MCP。" : {
       "localizations" : {
@@ -20344,7 +21200,14 @@
       }
     },
     "请选择已完成后台来电绑定的云端，才能保存。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a cloud that has finished background call binding before saving."
+          }
+        }
+      }
     },
     "请选择有效时区" : {
       "localizations" : {
@@ -20438,7 +21301,14 @@
       }
     },
     "请选择有效的重复日期" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a valid repeat day"
+          }
+        }
+      }
     },
     "请选择本地备份文件夹" : {
       "localizations" : {
@@ -20592,7 +21462,14 @@
       }
     },
     "账号线路" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current Call"
+          }
+        }
+      }
     },
     "账户凭据与识别参数" : {
       "localizations" : {
@@ -21661,7 +22538,14 @@
       }
     },
     "连接已完成" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection Complete"
+          }
+        }
+      }
     },
     "连接已有服务" : {
       "localizations" : {
@@ -21827,7 +22711,14 @@
       }
     },
     "连接端取消确认不匹配" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connector cancellation confirmation does not match"
+          }
+        }
+      }
     },
     "连接端响应不符合 Tincall 通话协议" : {
       "localizations" : {
@@ -21940,7 +22831,14 @@
       }
     },
     "连接端未确认定时来电状态" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The connector did not confirm the scheduled call state"
+          }
+        }
+      }
     },
     "连接端未确认移除定时来电" : {
       "localizations" : {
@@ -22096,6 +22994,12 @@
     },
     "连接能力检查失败（HTTP %lld%@），请检查部署函数和手机令牌。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection check failed (HTTP %1$lld%2$@). Check the deployed function and phone token."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "new",
@@ -22270,7 +23174,14 @@
       }
     },
     "选择一通电话，查看并管理云端副本" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose a call to view and manage its cloud copy"
+          }
+        }
+      }
     },
     "选择下一步" : {
       "localizations" : {
@@ -22594,7 +23505,14 @@
       }
     },
     "通话信息" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Info"
+          }
+        }
+      }
     },
     "通话偏好" : {
       "localizations" : {
@@ -22618,6 +23536,12 @@
     },
     "通话内容：上传 %lld 通，下载／更新 %lld 通，冲突 %lld 通。" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call content: %1$lld uploaded, %2$lld downloaded or updated, %3$lld conflicts."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "new",
@@ -22668,7 +23592,14 @@
       }
     },
     "通话卡片推送未被接受" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The call card push was not accepted"
+          }
+        }
+      }
     },
     "通话双方的姓名：\nuser：%@\nassistant：%@" : {
       "localizations" : {
@@ -22751,7 +23682,14 @@
       }
     },
     "通话已结束，但后端尚未确认取消生成，请检查后端取消接口。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The call ended, but the backend has not confirmed canceling generation. Check the backend’s cancel endpoint."
+          }
+        }
+      }
     },
     "通话已结束或本轮回复被打断，已收到的文字已保留" : {
       "extractionState" : "stale",
@@ -22972,7 +23910,14 @@
       }
     },
     "通话状态" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Call Status"
+          }
+        }
+      }
     },
     "通话状态：%@" : {
       "localizations" : {
@@ -23246,7 +24191,14 @@
       }
     },
     "部署令牌" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deployment Token"
+          }
+        }
+      }
     },
     "部署令牌只用于本次部署或更新，让 Tincall 能在所选项目里安装数据库和服务程序。它不是项目 API Key，也不是手机日常使用的令牌。" : {
       "extractionState" : "stale",
@@ -23549,7 +24501,14 @@
       }
     },
     "重复" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Repeat"
+          }
+        }
+      }
     },
     "重复保存会复用该联系人的令牌。此版本暂不支持在 App 中轮换令牌。" : {
       "extractionState" : "stale",
@@ -23695,7 +24654,14 @@
       }
     },
     "重试绑定" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry Binding"
+          }
+        }
+      }
     },
     "重试解除设备绑定" : {
       "localizations" : {
@@ -23801,10 +24767,24 @@
       }
     },
     "需云端定时任务与推送服务可用，忙线会跳过。关闭 App 不会取消计划，可用右侧开关暂停。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Requires the cloud scheduled task and push service. Skipped when busy. Closing the app does not cancel schedules; use the switch on the right to pause."
+          }
+        }
+      }
     },
     "需要处理冲突" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conflicts Need Attention"
+          }
+        }
+      }
     },
     "需要已部署的连接端、正确签名的 iPhone App、匹配的 APNs 发送凭据和设备绑定。仅填入地址或安装 MCP 工具并不能保证手机收到来电；免费自签和模拟器不能替代真机的主动来电验收。" : {
       "extractionState" : "stale",
@@ -24063,7 +25043,14 @@
       }
     },
     "项目编号应为 19 至 20 位小写字母或数字。" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The project reference should be 19 to 20 lowercase letters or numbers."
+          }
+        }
+      }
     },
     "项目编号应为 20 位小写字母或数字。" : {
       "extractionState" : "stale",

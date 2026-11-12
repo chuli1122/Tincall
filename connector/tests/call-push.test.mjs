@@ -8,6 +8,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createSQLiteStore} from '../sqlite-store.mjs';
 import {createCallJobs} from '../../supabase/functions/_shared/tincall/call-jobs.mjs';
+import {createConnector} from '../../supabase/functions/_shared/tincall/service.mjs';
 
 test('push jobs continue after one device fails and remove only confirmed obsolete bindings',async t=>{
   const directory=mkdtempSync(join(tmpdir(),'tincall-call-push-'));
@@ -82,4 +83,32 @@ test('old APNs failure cannot remove a token refreshed during delivery', async t
     headers: {Authorization: `Bearer ${config.pushToken}`, 'Content-Type': 'application/json'},
     body: JSON.stringify({owner_id: owner, binding_id: refreshed.binding_id, call_id: crypto.randomUUID(), contact_id: 'synthetic', source: 'mcp', event: 'incoming_call'})}));
   assert.equal(direct.status, 200, 'late failure must leave the new token enabled in the gateway');
+});
+
+test('push enrollment is relayed by the deployment that owns the push credential', async () => {
+  const pushToken = 'tcpush_abcdefghijklmnopqrst_' + 'a'.repeat(64);
+  const sent = [];
+  let reply = {status: 200, body: {registered: true}};
+  const connector = createConnector({
+    store: {async authenticate() { return null; }},
+    config: {bindings: [], pushURL: 'https://push.invalid/', pushToken},
+    fetcher: async (url, init) => { sent.push({url, init}); return new Response(JSON.stringify(reply.body), {status: reply.status}); },
+  });
+  const register = token => connector.handle(new Request('https://example.invalid/functions/v1/tincall/push/register', {
+    method: 'POST', headers: {Authorization: `Bearer ${token}`, 'Content-Type': 'application/json'}, body: '{}',
+  }));
+
+  const ok = await register(pushToken);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), {registered: true});
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].url, 'https://push.invalid/services/register');
+  assert.equal(sent[0].init.headers.Authorization, `Bearer ${pushToken}`);
+  assert.equal(sent[0].init.body, '{}');
+
+  assert.equal((await register('tcpush_other')).status, 403, 'only the configured push credential can enroll');
+  assert.equal(sent.length, 1);
+
+  reply = {status: 403, body: {error: {code: 'service_verification_failed'}}};
+  assert.equal((await register(pushToken)).status, 502, 'a refused enrollment is not reported as registered');
 });

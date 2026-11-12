@@ -95,9 +95,20 @@ private final class RoutingSession: CallAudioSessionRouting, @unchecked Sendable
                      "repair the missing A2DP option without changing mode or an explicit speaker choice")
         _ = try await routing.refreshBluetooth(preferAutomatic: true, session: identity)
         precondition(native.read().port == .bluetoothA2DP, "a newly connected headset must release the old speaker override")
+        native.change { $0.mode = .voiceChat }
+        _ = try await routing.refreshBluetooth(preferAutomatic: true, session: identity)
+        precondition(native.read().mode == .voiceChat, "ordinary route repair keeps the capture-owned mode")
+        _ = try await routing.refreshBluetooth(preferAutomatic: true, restoreMediaMode: true, session: identity)
+        precondition(native.read().mode == .default && native.read().options.contains([.allowBluetoothA2DP, .mixWithOthers]),
+                     "a mid-call headset returns VoiceChat to media mode with the call policy intact")
         let overrides = native.read().overrideCalls
         _ = try await routing.refreshBluetooth(preferAutomatic: true, session: identity)
         precondition(native.read().overrideCalls == overrides, "an automatic route report must not trigger a notification loop")
+        _ = try await routing.setSpeakerEnabled(true, session: identity)
+        native.change { $0.mode = .voiceChat }
+        _ = try await routing.setSpeakerEnabled(false, restoreMediaMode: true, session: identity)
+        precondition(native.read().mode == .default && native.read().port == .bluetoothA2DP,
+                     "turning the speaker off returns VoiceChat to media mode so the headset can take over")
         try await routing.setDucking(true, revision: 2, session: identity)
         try await routing.setDucking(false, revision: 1, session: identity)
         precondition(native.read().options.contains(.duckOthers), "stale ducking work must not override newer playback state")

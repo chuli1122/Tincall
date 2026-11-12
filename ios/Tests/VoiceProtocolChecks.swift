@@ -354,6 +354,13 @@ struct VoiceProtocolChecks {
         precondition(noPausePartial.isEmpty)
         let tail = try noPause.append("", final: true)
         precondition(tail.map(\.text) == ["普通句。"])
+
+        // A closing event stays with the last words instead of becoming a wordless request.
+        var trailingEvent = SpeechSegmenter(provider: .miniMax, model: "speech-2.8-hd")
+        let eventPartial = try trailingEvent.append("好啊。", final: false)
+        precondition(eventPartial.isEmpty)
+        let eventTail = try trailingEvent.append("(chuckle)", final: true)
+        precondition(eventTail.map(\.text) == ["好啊。(chuckle)"] && eventTail[0].caption == "好啊。")
     }
 
     private static func whisper(model: String = "", language: String? = nil, key: String? = nil) throws -> WhisperConfiguration {

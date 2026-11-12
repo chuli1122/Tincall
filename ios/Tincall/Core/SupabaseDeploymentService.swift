@@ -326,7 +326,7 @@ final class SupabaseDeploymentService {
             guard try await client.verifyConfiguredOfficialPush(ref: ref, token: pushToken) else {
                 throw TincallError(message: String(localized: "检测到已有推送配置，未覆盖原配置；请保留现有发送端，或移除后再重试官方推送开通。"))
             }
-            try await client.registerOfficialPush(token: pushToken)
+            try await client.registerOfficialPush(ref: ref, token: pushToken)
             saved.pushToken = nil
             saved.completed.insert(.push)
             try save(saved, ref: ref)
@@ -348,7 +348,7 @@ final class SupabaseDeploymentService {
             ["name": "TINCALL_PUSH_URL", "value": SupabaseManagementClient.officialPushURL.absoluteString],
             ["name": "TINCALL_PUSH_TOKEN", "value": pushToken]
         ])
-        try await client.registerOfficialPush(token: pushToken)
+        try await client.registerOfficialPush(ref: ref, token: pushToken)
         saved.pushToken = nil
         saved.completed.insert(.push)
         try save(saved, ref: ref)

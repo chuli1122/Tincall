@@ -138,6 +138,12 @@ struct SpeechSegmenter {
                 let total = tokens.reduce(0) { $0 + $1.bodyCount }
                 if tailCount < 21, total <= 48 { cut = tokens.count }
             }
+            // A trailing event such as (chuckle) with no words after it belongs to the
+            // last segment; on its own it would be a separate, wordless synthesis request.
+            if let boundary = cut, final,
+               tokens[boundary...].allSatisfy({ !$0.speakable && !$0.silence && !Self.isExpression($0.cue) }) {
+                cut = tokens.count
+            }
             if cut == nil, final, !tokens.isEmpty { cut = tokens.count }
             guard let cut, cut > 0 else { break }
             let chosen = Array(tokens.prefix(cut))

@@ -23,6 +23,8 @@ final class CallCoordinator {
     var record: CallRecord?
     var hasUnsavedAudio = false
     var savingCallIDs: Set<UUID> = []
+    /// Last save failure for any call, so a retry can explain failures outside the shown call.
+    @ObservationIgnored var lastSavingFailure: String?
     var externalConnectionLost = false
     var currentPlaybackCaption: String?
     var speechInterruptionEnabled = true
@@ -300,6 +302,7 @@ final class CallCoordinator {
     }
 
     func retrySaving() {
+        lastSavingFailure = nil
         for id in Array(records.keys) {
             persist(id)
             while let user = pendingFinalInputs[id]?.first {
@@ -321,6 +324,11 @@ final class CallCoordinator {
             }
         }
         beginQueuedInput()
+        if !savingCallIDs.isEmpty {
+            let audio = savingCallIDs.reduce(0) { $0 + (pendingAudio[$1]?.count ?? 0) }
+            let inputs = savingCallIDs.reduce(0) { $0 + (pendingFinalInputs[$1]?.count ?? 0) }
+            errorMessage = lastSavingFailure ?? String(localized: "仍有内容未保存：\(audio) 段录音、\(inputs) 条文字。")
+        }
     }
 
     func withActivityCheckpoint(_ value: CallRecord) -> CallRecord {

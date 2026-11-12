@@ -89,6 +89,20 @@ export function createConnector({store, config, schedule = promise => promise.ca
         const challenge=uuid(request.headers.get('x-tincall-push-challenge'),'challenge');
         return json({verified:true,challenge});
       }
+      if(path==='/push/register') {
+        // Phones may not reach the official push host directly; relay this deployment's own enrollment.
+        ensure(request.method==='POST','method_not_allowed',405);
+        ensure(config.pushToken && token===config.pushToken,'forbidden',403);
+        ensure(config.pushURL,'push_not_configured',422);
+        ensure(new URL(config.pushURL).protocol==='https:','push_url_requires_https',422);
+        let response;
+        try{response=await fetcher(`${config.pushURL.replace(/\/$/,'')}/services/register`,{method:'POST',
+          headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:'{}',signal:AbortSignal.timeout(15000),redirect:'error'});}
+        catch{throw new ConnectorError('push_registration_unavailable',503);}
+        const result=await response.json().catch(()=>null);
+        ensure(response.ok && result?.registered===true,'push_registration_failed',502);
+        return json({registered:true});
+      }
       if(path==='/worker') {
         ensure(request.method==='POST','method_not_allowed',405);
         ensure(config.workerToken && token===config.workerToken,'forbidden',403);

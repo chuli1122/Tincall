@@ -142,7 +142,8 @@ extension CallCoordinator {
             try save(value)
         } catch {
             savingCallIDs.insert(session.callID)
-            errorMessage = String(localized: "输入已保存，回复尚未开始，请重试保存：\(safeMessage(error))")
+            lastSavingFailure = String(localized: "输入已保存，回复尚未开始，请重试保存：\(safeMessage(error))")
+            errorMessage = lastSavingFailure
             return
         }
         records[session.callID] = value

@@ -7,7 +7,7 @@ import Foundation
 enum DataSharingConsent {
     static var privacyURL: URL {
         let path = Locale.current.language.languageCode?.identifier == "zh" ? "zh/privacy/" : "privacy/"
-        return URL(string: "https://tincall-site.tincall-app.workers.dev/" + path)!
+        return URL(string: "https://tincall.chuli.win/" + path)!
     }
 
     static func destination(_ connection: ConnectionProfile) -> [String] {

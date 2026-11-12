@@ -16,6 +16,33 @@ final class MicrophoneCapture {
     static func refreshForCurrentRoute() async {
         await activeCapture?.refreshForCurrentRoute(event: .captureRouteRestart)
     }
+    /// After a headset disconnects or the speaker replaces it, a graph built
+    /// without voice processing may now be playing through the phone.
+    static func refreshAfterOutputRemoved() async {
+        requestEchoCheck()
+        await activeCapture?.refreshForCurrentRoute(event: .captureRouteRestart)
+    }
+    /// The next refresh adds voice processing once if output is now the phone.
+    static func requestEchoCheck() { activeCapture?.echoCheckPending = true }
+    /// Voice processing holds the call in VoiceChat mode, where a headset that
+    /// connects mid-call cannot take over. Stop that graph once for the new
+    /// device; `refreshForCurrentRoute` rebuilds it for whichever output wins.
+    static func releaseVoiceProcessing() async -> Bool {
+        guard let capture = activeCapture, let engine = capture.engine,
+              engine.inputNode.isVoiceProcessingEnabled else { return false }
+        let generation = capture.generation
+        recordDiagnostic(.captureStage, phase: "release_voice_processing", generation: generation)
+        let failure = await Task.detached(priority: .userInitiated) { () -> (any Error)? in
+            engine.stop()
+            do { try engine.inputNode.setVoiceProcessingEnabled(false); return nil }
+            catch { return error }
+        }.value
+        if let failure {
+            recordDiagnostic(.captureFailed, phase: "release_voice_processing", generation: generation, error: failure)
+            return false
+        }
+        return true
+    }
     static var requiresSustainedSpeech = false {
         didSet {
             guard requiresSustainedSpeech != oldValue else { return }
@@ -34,6 +61,7 @@ final class MicrophoneCapture {
 
     private var engine: AVAudioEngine?
     private var capturedInputFormat: AVAudioFormat?
+    private var echoCheckPending = false
     private var configurationObserver: NSObjectProtocol?
     private var routeObserver: NSObjectProtocol?
     private var speechGate = SustainedSpeechGate(required: false)
@@ -191,8 +219,13 @@ final class MicrophoneCapture {
               let onAudio, let onError else { return }
         // Changing voice processing itself changes the output route. Rebuilding a
         // running engine to match that transient output creates an endless
-        // receiver → A2DP → receiver cycle. Only rebuild unusable capture I/O.
-        guard !engine.isRunning || engine.inputNode.outputFormat(forBus: 0) != capturedInputFormat else { return }
+        // receiver → A2DP → receiver cycle. Only rebuild unusable capture I/O,
+        // or add echo cancellation once after the phone replaced a headset.
+        let addEchoCancellation = echoCheckPending && !engine.inputNode.isVoiceProcessingEnabled &&
+            Self.needsEchoCancellation(outputPorts: AVAudioSession.sharedInstance().currentRoute.outputs.map(\.portType))
+        echoCheckPending = false
+        guard addEchoCancellation || !engine.isRunning ||
+              engine.inputNode.outputFormat(forBus: 0) != capturedInputFormat else { return }
         CallAudioDiagnostics.record(event, generation: generation)
         do { try await start(onAudio: onAudio, onError: onError) }
         catch is CancellationError { }
@@ -231,7 +264,7 @@ final class MicrophoneCapture {
                 if hasTap { engine.inputNode.removeTap(onBus: 0) }
             }
         }
-        hasTap = false; engine = nil; capturedInputFormat = nil; paused = false
+        hasTap = false; engine = nil; capturedInputFormat = nil; paused = false; echoCheckPending = false
         if Self.activeCapture === self { Self.activeCapture = nil }
         onAudio = nil; onError = nil
     }

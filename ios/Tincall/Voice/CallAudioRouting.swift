@@ -58,12 +58,14 @@ actor CallAudioRouting {
         try audio.setActive(true, options: [])
     }
 
-    func setSpeakerEnabled(_ enabled: Bool, session: VoiceSessionID) throws -> SpeakerResult {
+    func setSpeakerEnabled(_ enabled: Bool, restoreMediaMode: Bool = false,
+                           session: VoiceSessionID) throws -> SpeakerResult {
         guard self.session == session else { throw CancellationError() }
         let start = ProcessInfo.processInfo.systemUptime
         let previousOptions = audio.categoryOptions
         let previousMode = audio.mode
         let previousOverride = speakerOverride
+        let mode = restoreMediaMode ? AVAudioSession.Mode.default : previousMode
         var options = previousOptions.union(.allowBluetoothA2DP)
         // Once the default has been cleared, explicit overrides can switch both
         // ways without rebuilding the category on every tap.
@@ -71,9 +73,9 @@ actor CallAudioRouting {
         var result = SpeakerResult()
         result.ranOnMainThread = Thread.isMainThread
         do {
-            if audio.category != .playAndRecord || options != previousOptions {
+            if audio.category != .playAndRecord || options != previousOptions || mode != previousMode {
                 let categoryStart = ProcessInfo.processInfo.systemUptime
-                try audio.setCategory(.playAndRecord, mode: previousMode, options: options)
+                try audio.setCategory(.playAndRecord, mode: mode, options: options)
                 result.categoryMilliseconds = Int((ProcessInfo.processInfo.systemUptime - categoryStart) * 1000)
             } else { result.categoryMilliseconds = 0 }
             let outputStart = ProcessInfo.processInfo.systemUptime
@@ -109,7 +111,11 @@ actor CallAudioRouting {
         ducksOtherAudio = false
     }
 
-    func refreshBluetooth(preferAutomatic: Bool, session: VoiceSessionID) throws -> Bool {
+    /// `restoreMediaMode` is only for a newly connected device after capture has
+    /// released voice processing: VoiceChat mode keeps A2DP-only headsets from
+    /// taking over, so the call returns to the media mode it started with.
+    func refreshBluetooth(preferAutomatic: Bool, restoreMediaMode: Bool = false,
+                          session: VoiceSessionID) throws -> Bool {
         guard self.session == session else { throw CancellationError() }
         let previousOverride = speakerOverride
         let clearOverride = preferAutomatic && speakerOverride != nil
@@ -117,11 +123,12 @@ actor CallAudioRouting {
         var options = audio.categoryOptions.union([.allowBluetoothA2DP, .mixWithOthers])
         if ducksOtherAudio { options.insert(.duckOthers) }
         else { options.remove(.duckOthers) }
+        let mode = restoreMediaMode ? AVAudioSession.Mode.default : audio.mode
         do {
-            if options != audio.categoryOptions {
+            if options != audio.categoryOptions || mode != audio.mode {
                 // System route changes can drop mixing/ducking as well as A2DP.
                 // Restore the call policy without replacing its mode or output choice.
-                try audio.setCategory(.playAndRecord, mode: audio.mode, options: options)
+                try audio.setCategory(.playAndRecord, mode: mode, options: options)
                 if speakerOverride == true { try audio.overrideOutputAudioPort(.speaker) }
             }
             if clearOverride { try audio.overrideOutputAudioPort(.none) }
