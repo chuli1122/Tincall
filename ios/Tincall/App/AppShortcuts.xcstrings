@@ -6,8 +6,20 @@
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "needs_review",
+            "state" : "translated",
             "value" : "Message your AI with ${applicationName}"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "${applicationName} で相手にメッセージを送る"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "${applicationName}에서 상대에게 메시지 보내기"
           }
         },
         "zh-Hans" : {
@@ -16,6 +28,12 @@
             "values" : [
               "用 ${applicationName} 给 TA 发消息"
             ]
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用 ${applicationName} 傳訊息給對方"
           }
         }
       }

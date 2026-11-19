@@ -6,7 +6,7 @@
 
 | 组件 | 版本／来源 | 许可和保留位置 | 用途 |
 | --- | --- | --- | --- |
-| ONNX Runtime Swift Package 与 iOS 运行库 | 工程锁定 1.24.2；[Swift 包](https://github.com/microsoft/onnxruntime-swift-package-manager)、[运行库](https://github.com/microsoft/onnxruntime) | MIT 顶层许可；[随库许可](../ios/Tincall/Features/Settings/Licenses/ONNXRuntime-LICENSE.txt)。首次构建由 SPM 下载，不随源码快照复制二进制缓存 | 运行本机 VAD |
+| ONNX Runtime Swift Package 与 iOS 运行库 | 工程锁定 1.24.2；[Swift 包](https://github.com/chuli1122/onnxruntime-swift-package-manager)（微软原仓库 2026-11-17 起无法访问，此为未改动的原样镜像）；运行库二进制仍从 download.onnxruntime.ai 下载 | MIT 顶层许可；[随库许可](../ios/Tincall/Features/Settings/Licenses/ONNXRuntime-LICENSE.txt)。首次构建由 SPM 下载，不随源码快照复制二进制缓存 | 运行本机 VAD |
 | Silero VAD | [v5.1 官方模型](https://github.com/snakers4/silero-vad/blob/v5.1/src/silero_vad/data/silero_vad.onnx)；随库模型内容与官方 v5.1、v5.1.1、v5.1.2 相同，这三个标签共用同一模型 | MIT；[模型目录许可](../ios/Tincall/Voice/Assets/VoiceCallVADAssets/LICENSE) 与 [App 声明](../ios/Tincall/Features/Settings/Licenses/SileroVAD-LICENSE.txt) | 人声活动检测，不用于声纹识别 |
 | LAME | 3.100，C 源码来自 [SwiftLAME 0.1.0 的 Sources/LAME](https://github.com/hidden-spectrum/SwiftLAME/tree/0.1.0/Sources/LAME)；未使用其 Swift 包装层 | [LGPL 2.1 原文](../ios/LocalPackages/LAME/LAME-LICENSE.txt)；完整 C 源码与构建说明在 [本地包](../ios/LocalPackages/LAME/README.md)，文件内原声明保留 | 将临时原声模型输入编码成 MP3；工程使用动态库 |
 

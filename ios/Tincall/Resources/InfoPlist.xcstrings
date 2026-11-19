@@ -3,8 +3,36 @@
   "strings" : {
     "NSSiriUsageDescription" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow system Contacts and Siri to start Tincall calls." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用于让系统通讯录和 Siri 发起 Tincall 通话。" } }
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow system Contacts and Siri to start Tincall calls."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "システムの連絡先と Siri から Tincall の通話を発信するために使用します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "시스템 연락처와 Siri에서 Tincall 통화를 시작할 수 있도록 사용합니다."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于让系统通讯录和 Siri 发起 Tincall 通话。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用於讓系統聯絡人和 Siri 發起 Tincall 通話。"
+          }
+        }
       }
     },
     "CFBundleDisplayName" : {
@@ -40,10 +68,28 @@
             "value" : "Take photos to send to the person you are calling."
           }
         },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写真を撮って通話相手に送るために使用します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "사진을 찍어 통화 상대에게 보내는 데 사용합니다."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "用于拍照后发送给通话对象"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用於拍照後傳送給通話對象"
           }
         }
       }
@@ -57,10 +103,28 @@
             "value" : "Read contacts you choose and add dedicated Tincall call numbers while keeping existing numbers."
           }
         },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選択した連絡先の情報を読み取り、既存の番号を残したまま Tincall 専用の通話番号を追加します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "선택한 연락처 정보를 읽고, 기존 번호를 유지한 채 Tincall 전용 통화 번호를 추가합니다."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "读取你选择的联系人资料，并添加 Tincall 专用通话号码，保留原有号码。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "讀取你選擇的聯絡人資料，並新增 Tincall 專用通話號碼，保留原有號碼。"
           }
         }
       }
@@ -74,10 +138,28 @@
             "value" : "Capture your voice during calls and transcribe speech."
           }
         },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話中の音声入力と文字起こしに使用します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "통화 중 음성 입력과 음성 받아쓰기에 사용합니다."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "用于通话收音和语音转写。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用於通話收音和語音轉寫。"
           }
         }
       }
@@ -91,10 +173,28 @@
             "value" : "Transcribe call audio into text."
           }
         },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通話の音声を文字に変換するために使用します。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "통화 음성을 텍스트로 변환하는 데 사용합니다."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "用于将通话语音转写为文字。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用於將通話語音轉寫為文字。"
           }
         }
       }

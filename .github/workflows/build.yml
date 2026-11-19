@@ -60,16 +60,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: English strings complete
+      - name: Translated strings complete
         shell: python3 {0}
         run: |
           import json, pathlib, re, sys
-          # Chinese source strings must ship with English; otherwise English users see Chinese.
-          missing = [f"{path}: {key[:60]}" for path in sorted(pathlib.Path("ios").rglob("*.xcstrings"))
+          # Chinese source strings must ship in every UI language; otherwise those users see Simplified Chinese.
+          missing = [f"{path} [{lang}]: {key[:60]}" for path in sorted(pathlib.Path("ios").rglob("*.xcstrings"))
                      for key, entry in json.loads(path.read_text(encoding="utf-8"))["strings"].items()
                      if re.search(r"[\u4e00-\u9fff]", key) and entry.get("shouldTranslate") is not False
-                     and entry.get("extractionState") != "stale" and "en" not in entry.get("localizations", {})]
-          print("\n".join(missing) or "All Chinese strings have English.")
+                     and entry.get("extractionState") != "stale"
+                     for lang in ("en", "ja", "ko", "zh-Hant") if lang not in entry.get("localizations", {})]
+          print("\n".join(missing) or "All Chinese strings have en, ja, ko and zh-Hant.")
           sys.exit(1 if missing else 0)
       - name: Cloudflare tests
         run: node --test cloudflare/tests/*.test.mjs

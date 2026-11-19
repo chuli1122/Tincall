@@ -149,12 +149,12 @@ struct TincallToggleMicrophoneIntent: LiveActivityIntent, AudioRecordingIntent {
         guard let id = UUID(uuidString: callID) else {
             TincallMicrophoneDiagnostics.record(.invalidIdentifier)
             throw NSError(domain: "TincallCall", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "请打开 Tincall 恢复通话后再操作麦克风"])
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "请打开 Tincall 恢复通话后再操作麦克风")])
         }
         guard let action = Self.microphoneAction else {
             TincallMicrophoneDiagnostics.record(.missingHandler)
             throw NSError(domain: "TincallCall", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "请打开 Tincall 恢复通话后再操作麦克风"])
+                          userInfo: [NSLocalizedDescriptionKey: String(localized: "请打开 Tincall 恢复通话后再操作麦克风")])
         }
         try await action(id)
         TincallMicrophoneDiagnostics.record(.intentCompleted)

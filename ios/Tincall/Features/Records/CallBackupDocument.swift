@@ -17,7 +17,7 @@ struct CallBackupDocument: FileDocument {
 
     init(configuration: ReadConfiguration) throws {
         // Imports use the validated, file-by-file CallRecordStore importer.
-        throw TincallError(message: "请使用通话记录页的导入按钮选择文件夹备份")
+        throw TincallError(message: String(localized: "请使用通话记录页的导入按钮选择文件夹备份"))
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {

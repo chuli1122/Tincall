@@ -568,11 +568,11 @@ struct CallScreen<Transcript: View>: View {
                             .disabled(!microphoneAvailable)
                             .accessibilityLabel(isMuted ? String(localized: "开启麦克风") : String(localized: "关闭麦克风"))
                             .accessibilityValue(microphoneAvailable ? (isMuted ? String(localized: "已关闭") : String(localized: "已打开")) : String(localized: "麦克风不可用"))
-                        controlButton(symbol: "phone.down.fill", title: "挂断", color: Color(red: 0.87, green: 0.25, blue: 0.33),
+                        controlButton(symbol: "phone.down.fill", title: String(localized: "挂断"), color: Color(red: 0.87, green: 0.25, blue: 0.33),
                                       size: 68, action: hangUp)
                             .accessibilityLabel("挂断通话")
                         controlButton(symbol: isSpeakerEnabled ? "speaker.wave.2.fill" : "speaker.fill",
-                                      title: "扬声器", color: nil,
+                                      title: String(localized: "扬声器"), color: nil,
                                       isSelected: isSpeakerEnabled,
                                       isEnabled: onToggleSpeaker != nil, action: toggleSpeaker)
                             .accessibilityLabel(isSpeakerEnabled ? String(localized: "切换到听筒") : String(localized: "切换到扬声器"))
@@ -583,10 +583,10 @@ struct CallScreen<Transcript: View>: View {
             } else if isCallEnded {
                 CallRoundButton(systemImage: "xmark", title: String(localized: "退出通话")) { close() }
             } else if isConfigured {
-                CallRoundButton(systemImage: "phone.fill", title: "开始通话", action: onStart).disabled(!canStart)
+                CallRoundButton(systemImage: "phone.fill", title: String(localized: "开始通话"), action: onStart).disabled(!canStart)
             } else {
                 if errorMessage == nil, let onPreview {
-                    controlButton(symbol: "phone", title: "预览通话页面", color: CallNight.lavender,
+                    controlButton(symbol: "phone", title: String(localized: "预览通话页面"), color: CallNight.lavender,
                                   size: 68, action: onPreview)
                 }
             }
