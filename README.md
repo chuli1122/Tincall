@@ -1,8 +1,22 @@
+<div align="center">
+
 # Tincall
 
-[![build](https://github.com/chuli1122/Tincall/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/chuli1122/Tincall/actions/workflows/build.yml) [![release](https://img.shields.io/github/v/release/chuli1122/Tincall)](https://github.com/chuli1122/Tincall/releases/latest) [![iOS 26+](https://img.shields.io/badge/iOS-26%2B-000000?logo=apple&logoColor=white)](#) [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](#) [![license](https://img.shields.io/badge/license-Personal%20use-blue)](LICENSE)
+**原生 iOS AI 语音通话 App**
+
+直连模型 API、自有后端或 MCP，让 TA 直接拨进你的 iOS 系统来电界面。
+
+[![build](https://github.com/chuli1122/Tincall/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/chuli1122/Tincall/actions/workflows/build.yml)
+[![release](https://img.shields.io/github/v/release/chuli1122/Tincall)](https://github.com/chuli1122/Tincall/releases/latest)
+[![iOS 26+](https://img.shields.io/badge/iOS-26%2B-000000?logo=apple&logoColor=white)](#)
+[![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](#)
+[![license](https://img.shields.io/badge/license-Personal%20use-blue)](LICENSE)
+
+<a href="https://github.com/DasterProkio/awesome-ai-companion/blob/main/README.zh-CN.md"><img src="https://raw.githubusercontent.com/DasterProkio/awesome-ai-companion/main/assets/featured-in-awesome-ai-companion-zh-CN.png" alt="已收录于人机恋开源项目大全" height="24"></a>
 
 **简体中文** · [English](README.en.md)
+
+</div>
 
 <p align="center">
   <img src="docs/images/01-tincall-incoming.png" width="19%" alt="系统来电与通话：使用 iOS 系统来电界面接听 TA 的来电">
